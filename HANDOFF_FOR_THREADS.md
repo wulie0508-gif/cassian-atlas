@@ -9,7 +9,46 @@ $env:ENGLISH_TRACKER_DB_NAME = 'learning.sqlite'
 
 Do not open the SQLite database for ad hoc writes. Do not edit migrations already applied. New producers must send JSON through the CLI.
 
+## Preferred live handoff: local HTTP API
+
+When the management hub is running, read the audience-specific context first. This replaces repeatedly rewriting a handoff document:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8788/api/context/engineering
+Invoke-RestMethod http://127.0.0.1:8788/api/context/courseware
+Invoke-RestMethod http://127.0.0.1:8788/api/context/dictation
+```
+
+The responses contain current weaknesses, due reviews, project status, question-bank counts and the applicable endpoint map. Stable endpoints:
+
+| Need | Method and endpoint |
+| --- | --- |
+| One verified question and deep detail | `GET /api/questions/{question_id}` |
+| One grammar question's normalized mappings | `GET /api/grammar/questions/{question_id}` |
+| One complete passage coverage | `GET /api/grammar/passages/{passage_id}/coverage` |
+| Several passages as a matrix | `GET /api/grammar/coverage-matrix?passage_id=PAS-1&passage_id=PAS-2` |
+| Minimal complete-passage selection | `POST /api/grammar/select-passages` |
+| Source-material RAG search | `GET /api/library/search?q=...` |
+| Staged full-library candidates | `GET /api/library/candidates?q=...` |
+| Batch classroom attempts | `POST /api/classroom/attempts` |
+| Weekly and trend data | `GET /api/reports/weekly`, `GET /api/reports/trends?start=YYYY-MM-DD&end=YYYY-MM-DD` |
+| Dictation queue, OCR contract and results | `GET /api/dictation/plan`, `GET /api/contracts/dictation-ocr`, `POST /api/dictation/results` |
+
+Example complete-passage selection body:
+
+```json
+{
+  "target_codes": ["tense", "noun_clause", "preposition_collocation"],
+  "max_passages": 5,
+  "recent_error_days": 30
+}
+```
+
+The web selector and API both use the same weighted greedy set-cover implementation and return whole passages only.
+
 ## Dictation conversation: record a session and results
+
+For OCR integration, read `GET /api/contracts/dictation-ocr`. The OCR producer must submit the raw recognized answer unchanged; it must not compare with or rewrite toward the standard answer. Deterministic local grading then happens through `POST /api/dictation/results`, so normal repeated use consumes no model tokens.
 
 Shortest commands:
 
@@ -277,3 +316,14 @@ python -m english_tracker ingest correct --event EVT-BAD-IMPORT --kind attempts 
 ```
 
 After any correction, run `data check` and regenerate both context exports.
+
+## Full-library candidate boundary
+
+The source parsing ledger and official question bank are intentionally separate layers inside the same learning system—not parallel student databases:
+
+- `library_resources` through `library_text_chunks` describe source files, exact duplicates, extraction and RAG provenance.
+- `staged_passages`, `staged_questions`, and `staged_question_knowledge_map` contain machine-structured candidates.
+- `library_structure_reviews` is the review queue for missing answers, options, passages and ambiguous OCR.
+- The external verified question bank remains read-only. Only source-checked or manually verified content is treated as official.
+
+Audio at `parse_status=indexed` is discoverable and paired, but is not claimed as transcribed. Text completion and audio indexing are reported separately by `/api/library`.

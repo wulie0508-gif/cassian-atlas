@@ -18,6 +18,12 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
 ]
 
+[project.optional-dependencies]
+parsing = [
+  "pypdf>=5,<7",
+  "pywin32>=306; platform_system == 'Windows'",
+]
+
 [project.scripts]
 english-tracker = "english_tracker.cli:main"
 
@@ -29,5 +35,4 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-english_tracker = ["migrations/*.sql"]
-
+english_tracker = ["migrations/*.sql", "web/*.html", "web/*.css", "web/*.js"]

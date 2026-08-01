@@ -121,6 +121,65 @@ def run_quality_checks(conn) -> dict[str, Any]:
         "Downgrade the mapping to suggested and require explicit manual verification.",
     )
     add(
+        "deep_enrichment_verification_guard",
+        "critical",
+        _count(
+            conn,
+            """
+            SELECT
+              (SELECT COUNT(*) FROM question_deep_knowledge_map
+               WHERE mapping_source='model_suggested' AND verification_status IN ('source_checked','verified'))
+              +
+              (SELECT COUNT(*) FROM question_enrichments
+               WHERE mapping_source='model_suggested' AND verification_status IN ('source_checked','verified'))
+              +
+              (SELECT COUNT(*) FROM knowledge_search_documents
+               WHERE mapping_source='model_suggested' AND verification_status IN ('source_checked','verified'))
+              +
+              (SELECT COUNT(*) FROM staged_question_knowledge_map
+               WHERE mapping_source IN ('model_suggested','rule')
+                 AND verification_status IN ('source_checked','verified'))
+            """,
+        ),
+        "Generated deep mappings and staged mappings are never auto-verified",
+        "Downgrade generated records to suggested and require an explicit manual review action.",
+    )
+    add(
+        "library_duplicate_lineage",
+        "high",
+        _count(
+            conn,
+            """
+            SELECT COUNT(*) FROM library_resources d
+            LEFT JOIN library_resources c ON c.resource_id=d.duplicate_of_resource_id
+            WHERE d.is_canonical=0 AND (d.duplicate_of_resource_id IS NULL OR c.resource_id IS NULL OR c.is_canonical<>1)
+            """,
+        ),
+        "Every exact duplicate points to a canonical source resource",
+        "Repeat hashing and duplicate propagation, then review broken lineage before parsing.",
+    )
+    add(
+        "library_source_set_preferred_membership",
+        "high",
+        _count(
+            conn,
+            """
+            SELECT COUNT(*) FROM library_source_sets s
+            WHERE (s.preferred_prompt_resource_id IS NOT NULL AND NOT EXISTS (
+                     SELECT 1 FROM library_source_set_resources m
+                     WHERE m.source_set_id=s.source_set_id AND m.resource_id=s.preferred_prompt_resource_id))
+               OR (s.preferred_answer_resource_id IS NOT NULL AND NOT EXISTS (
+                     SELECT 1 FROM library_source_set_resources m
+                     WHERE m.source_set_id=s.source_set_id AND m.resource_id=s.preferred_answer_resource_id))
+               OR (s.preferred_audio_resource_id IS NOT NULL AND NOT EXISTS (
+                     SELECT 1 FROM library_source_set_resources m
+                     WHERE m.source_set_id=s.source_set_id AND m.resource_id=s.preferred_audio_resource_id))
+            """,
+        ),
+        "Every preferred prompt, answer, and audio resource belongs to its logical source set",
+        "Re-run the deterministic source-pairing stage and inspect any ambiguous source set.",
+    )
+    add(
         "grammar_snapshot_catalog_reconciliation",
         "high",
         _count(
@@ -207,6 +266,13 @@ def run_quality_checks(conn) -> dict[str, Any]:
             "grammar_question_catalog",
             "question_knowledge_map",
             "session_assessments",
+            "library_resources",
+            "library_source_sets",
+            "library_text_chunks",
+            "staged_passages",
+            "staged_questions",
+            "staged_question_knowledge_map",
+            "library_structure_reviews",
         )
     }
     severity_order = {"critical": 4, "high": 3, "medium": 2, "low": 1}

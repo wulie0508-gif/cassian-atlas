@@ -20,11 +20,26 @@ from .db import (
 )
 from .ingest import IngestConflict, import_attempts, import_progress, import_session, undo_ingest_event
 from .grammar_catalog import coverage_matrix, passage_coverage, question_knowledge, sync_grammar_catalog, write_coverage_csv
+from .enrichment import enrich_question_bank, search_knowledge
+from .library import (
+    convert_legacy_word,
+    extract_library_text,
+    hash_library,
+    import_pdf_ocr_json,
+    library_summary,
+    propagate_duplicate_status,
+    reconcile_question_bank,
+    reuse_textbook_ocr,
+    scan_library,
+)
+from .question_pipeline import pair_library_sources, structure_library, structure_summary
 from .migrate_legacy import migrate_legacy
 from .metrics import trend_report, weekly_report
 from .quality import quality_markdown, run_quality_checks
 from .selection import weighted_set_cover
 from .util import read_json, write_json
+from .webapp import configured_library_root, configured_question_bank, serve
+from .weights import weight_policy_report, weighted_mastery_report
 
 
 def _emit(value: Any, output: str | None = None) -> None:
@@ -309,6 +324,202 @@ def cmd_db_info(args) -> int:
     return 0
 
 
+def cmd_library_scan(args) -> int:
+    _, conn = _open(args)
+    try:
+        result = scan_library(conn, args.root, library_key=args.library_key)
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_library_hash(args) -> int:
+    _, conn = _open(args)
+    try:
+        result = hash_library(
+            conn,
+            library_key=args.library_key,
+            include_audio=args.include_audio,
+            limit=args.limit,
+        )
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_library_extract(args) -> int:
+    data_dir, conn = _open(args)
+    cache_root = Path(args.cache_root) if args.cache_root else data_dir / "library_cache" / "extracted"
+    try:
+        result = extract_library_text(conn, cache_root, library_key=args.library_key, limit=args.limit)
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_library_summary(args) -> int:
+    _, conn = _open(args)
+    try:
+        result = library_summary(conn, library_key=args.library_key)
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_library_reconcile(args) -> int:
+    _, conn = _open(args)
+    try:
+        result = reconcile_question_bank(conn, args.question_bank, library_key=args.library_key)
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_library_convert_doc(args) -> int:
+    data_dir, conn = _open(args)
+    cache_root = Path(args.cache_root) if args.cache_root else data_dir / "library_cache"
+    try:
+        result = convert_legacy_word(conn, cache_root, library_key=args.library_key, limit=args.limit)
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_library_propagate_duplicates(args) -> int:
+    _, conn = _open(args)
+    try:
+        result = propagate_duplicate_status(conn, library_key=args.library_key)
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_library_pair(args) -> int:
+    _, conn = _open(args)
+    try:
+        result = pair_library_sources(conn, library_key=args.library_key)
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_library_structure(args) -> int:
+    data_dir, conn = _open(args)
+    backup = _backup(data_dir, "pre-library-structure")
+    try:
+        result = structure_library(conn, library_key=args.library_key, limit=args.limit)
+    finally:
+        conn.close()
+    result["backup"] = backup
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_library_structure_summary(args) -> int:
+    _, conn = _open(args)
+    try:
+        result = structure_summary(conn, library_key=args.library_key)
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_library_reuse_textbook_ocr(args) -> int:
+    data_dir, conn = _open(args)
+    backup = _backup(data_dir, "pre-textbook-ocr-reuse")
+    cache_root = Path(args.cache_root) if args.cache_root else ensure_private_layout(data_dir)["library_cache"]
+    try:
+        result = reuse_textbook_ocr(
+            conn,
+            args.question_bank,
+            cache_root,
+            library_key=args.library_key,
+        )
+    finally:
+        conn.close()
+    result["backup"] = backup
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_library_import_ocr(args) -> int:
+    data_dir, conn = _open(args)
+    backup = _backup(data_dir, "pre-pdf-ocr-import")
+    cache_root = Path(args.cache_root) if args.cache_root else ensure_private_layout(data_dir)["library_cache"]
+    try:
+        result = import_pdf_ocr_json(conn, args.resource, args.json_dir, cache_root)
+    finally:
+        conn.close()
+    result["backup"] = backup
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_knowledge_enrich(args) -> int:
+    data_dir, conn = _open(args)
+    backup = _backup(data_dir, "question-enrichment")
+    try:
+        result = enrich_question_bank(conn, args.question_bank, limit=args.limit)
+    finally:
+        conn.close()
+    result["backup"] = backup
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_knowledge_search(args) -> int:
+    _, conn = _open(args)
+    try:
+        result = search_knowledge(conn, args.query, limit=args.limit)
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_weight_policy(args) -> int:
+    _, conn = _open(args)
+    try:
+        result = weight_policy_report(conn)
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_weighted_mastery(args) -> int:
+    _, conn = _open(args)
+    try:
+        result = weighted_mastery_report(conn, args.student)
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_serve(args) -> int:
+    data_dir = _data_dir(args)
+    serve(
+        data_dir,
+        question_bank=configured_question_bank(args.question_bank),
+        library_root=configured_library_root(args.library_root),
+        student_id=args.student,
+        host=args.host,
+        port=args.port,
+        open_browser=args.open_browser,
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="english-tracker", description="Local, auditable English learning records")
     parser.add_argument("--data-dir", help="Private runtime data directory; may also use ENGLISH_TRACKER_DATA_DIR")
@@ -397,6 +608,16 @@ def build_parser() -> argparse.ArgumentParser:
     knowledge_matrix.add_argument("--csv")
     knowledge_matrix.add_argument("--output")
     knowledge_matrix.set_defaults(func=cmd_knowledge_matrix)
+    knowledge_enrich = knowledge_sub.add_parser("enrich", help="Build detailed rule-suggested knowledge and RAG metadata")
+    knowledge_enrich.add_argument("--question-bank", required=True)
+    knowledge_enrich.add_argument("--limit", type=int, default=0)
+    knowledge_enrich.add_argument("--output")
+    knowledge_enrich.set_defaults(func=cmd_knowledge_enrich)
+    knowledge_search = knowledge_sub.add_parser("search", help="Search detailed knowledge and teaching-method documents")
+    knowledge_search.add_argument("--query", required=True)
+    knowledge_search.add_argument("--limit", type=int, default=30)
+    knowledge_search.add_argument("--output")
+    knowledge_search.set_defaults(func=cmd_knowledge_search)
 
     select = sub.add_parser("select", help="Automatic content selection")
     select_sub = select.add_subparsers(dest="select_command", required=True)
@@ -424,6 +645,13 @@ def build_parser() -> argparse.ArgumentParser:
     report_trends.add_argument("--end", required=True)
     report_trends.add_argument("--output")
     report_trends.set_defaults(func=cmd_trend_report)
+    report_mastery = report_sub.add_parser("weighted-mastery", help="Offline-calibrated knowledge mastery")
+    report_mastery.add_argument("--student", required=True)
+    report_mastery.add_argument("--output")
+    report_mastery.set_defaults(func=cmd_weighted_mastery)
+    report_weights = report_sub.add_parser("weight-policy", help="Explain the current evidence-weight policy")
+    report_weights.add_argument("--output")
+    report_weights.set_defaults(func=cmd_weight_policy)
 
     migrate = sub.add_parser("migrate", help="Read-only legacy migrations")
     migrate_sub = migrate.add_subparsers(dest="migrate_command", required=True)
@@ -458,12 +686,89 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--migration-report")
     check.set_defaults(func=cmd_quality)
 
+    library = sub.add_parser("library", help="Auditable source-library inventory and parsing")
+    library_sub = library.add_subparsers(dest="library_command", required=True)
+    library_scan = library_sub.add_parser("scan", help="Inventory source files without deleting or moving them")
+    library_scan.add_argument("--root", required=True)
+    library_scan.add_argument("--library-key", default="english_library")
+    library_scan.add_argument("--output")
+    library_scan.set_defaults(func=cmd_library_scan)
+    library_hash = library_sub.add_parser("hash", help="Hash English files and mark exact duplicates")
+    library_hash.add_argument("--library-key", default="english_library")
+    library_hash.add_argument("--include-audio", action="store_true")
+    library_hash.add_argument("--limit", type=int, default=0)
+    library_hash.add_argument("--output")
+    library_hash.set_defaults(func=cmd_library_hash)
+    library_extract = library_sub.add_parser("extract", help="Extract text-layer content into the private cache")
+    library_extract.add_argument("--library-key", default="english_library")
+    library_extract.add_argument("--cache-root")
+    library_extract.add_argument("--limit", type=int, default=0)
+    library_extract.add_argument("--output")
+    library_extract.set_defaults(func=cmd_library_extract)
+    library_report = library_sub.add_parser("summary", help="Report audited full-library progress")
+    library_report.add_argument("--library-key", default="english_library")
+    library_report.add_argument("--output")
+    library_report.set_defaults(func=cmd_library_summary)
+    library_reconcile = library_sub.add_parser("reconcile", help="Mark source files already present in the question bank")
+    library_reconcile.add_argument("--question-bank", required=True)
+    library_reconcile.add_argument("--library-key", default="english_library")
+    library_reconcile.add_argument("--output")
+    library_reconcile.set_defaults(func=cmd_library_reconcile)
+    library_convert = library_sub.add_parser("convert-doc", help="Convert legacy .doc files with local Microsoft Word")
+    library_convert.add_argument("--library-key", default="english_library")
+    library_convert.add_argument("--cache-root")
+    library_convert.add_argument("--limit", type=int, default=100)
+    library_convert.add_argument("--output")
+    library_convert.set_defaults(func=cmd_library_convert_doc)
+    library_duplicates = library_sub.add_parser("propagate-duplicates", help="Reuse canonical parse state for exact copies")
+    library_duplicates.add_argument("--library-key", default="english_library")
+    library_duplicates.add_argument("--output")
+    library_duplicates.set_defaults(func=cmd_library_propagate_duplicates)
+    library_pair = library_sub.add_parser("pair", help="Group prompt, answer, explanation, and audio files into logical sources")
+    library_pair.add_argument("--library-key", default="english_library")
+    library_pair.add_argument("--output")
+    library_pair.set_defaults(func=cmd_library_pair)
+    library_structure = library_sub.add_parser("structure", help="Build auditable RAG chunks and staged question/passages")
+    library_structure.add_argument("--library-key", default="english_library")
+    library_structure.add_argument("--limit", type=int, default=0)
+    library_structure.add_argument("--output")
+    library_structure.set_defaults(func=cmd_library_structure)
+    library_structure_report = library_sub.add_parser("structure-summary", help="Report staged source, question, and review counts")
+    library_structure_report.add_argument("--library-key", default="english_library")
+    library_structure_report.add_argument("--output")
+    library_structure_report.set_defaults(func=cmd_library_structure_summary)
+    library_textbook = library_sub.add_parser("reuse-textbook-ocr", help="Reuse audited textbook OCR already present in the question bank")
+    library_textbook.add_argument("--question-bank", required=True)
+    library_textbook.add_argument("--library-key", default="english_library")
+    library_textbook.add_argument("--cache-root")
+    library_textbook.add_argument("--output")
+    library_textbook.set_defaults(func=cmd_library_reuse_textbook_ocr)
+    library_ocr_import = library_sub.add_parser("import-ocr", help="Import page OCR JSON for a scanned PDF")
+    library_ocr_import.add_argument("--resource", required=True)
+    library_ocr_import.add_argument("--json-dir", required=True)
+    library_ocr_import.add_argument("--cache-root")
+    library_ocr_import.add_argument("--output")
+    library_ocr_import.set_defaults(func=cmd_library_import_ocr)
+
+    web = sub.add_parser("serve", help="Start the local learning-management website")
+    web.add_argument("--question-bank")
+    web.add_argument("--library-root")
+    web.add_argument("--student", default="STU-001")
+    web.add_argument("--host", default="127.0.0.1")
+    web.add_argument("--port", type=int, default=8788)
+    web.add_argument("--open-browser", action="store_true")
+    web.set_defaults(func=cmd_serve)
+
     info = sub.add_parser("info", help="Show database configuration and counts")
     info.set_defaults(func=cmd_db_info)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

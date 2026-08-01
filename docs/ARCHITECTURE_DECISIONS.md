@@ -14,6 +14,10 @@
 10. Rule/model mappings remain suggested until manual review. A database constraint prevents model-generated mappings from becoming verified automatically.
 11. Passage selection uses weighted greedy set-cover over complete source-checked passages; it never optimizes individual blanks outside their passage.
 12. Assessment raw scores are partitioned by kind, reporting series, and maximum score. Schedule compliance and learning outcomes are separate measurements.
+13. Offline closed evidence calibrates everyday practice: formal full papers use weight 1.60, biweekly mixed tests 1.40, offline topic tests 1.20, and offline dictation 1.10 before item/evidence-quality multipliers.
+14. Full-library parsing is a staging layer in the unified learning system, not a second student database. Automated candidates remain `suggested`/`needs_check` until source review.
+15. Text parsing and audio indexing are separate completion claims. An indexed audio file is paired and searchable by metadata but is never described as transcribed without transcript evidence.
+16. Three conversations exchange live context and writes through a local HTTP API; the Markdown handoff remains the durable contract and fallback.
 
 ## Risks and controls
 
@@ -31,3 +35,6 @@
 | Coarse or incorrect legacy grammar tags | Misleading fine-grained coverage | source snapshot, raw/normalized fields, confirmed-vs-suggested matrix, rationale and confidence |
 | Model suggestion treated as reviewed truth | Automated label contamination | SQL CHECK constraint plus quality gate |
 | Unlike exam totals joined as one trend | False score trend | series key includes assessment kind, reporting series, and maximum score |
+| Machine-split source material mistaken for verified questions | Unreliable lessons and analytics | separate staging tables, visible review queue, verification boundary and SQL guards |
+| Audio indexing reported as transcription | False completeness claim | separate resource state, counts and interface labels |
+| Multiple conversations write SQLite directly | corruption and conflicting semantics | idempotent CLI/HTTP import contracts and automatic backups |

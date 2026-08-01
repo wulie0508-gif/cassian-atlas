@@ -11,8 +11,9 @@ The private data directory contains the real SQLite database, import inboxes, ba
 ## Requirements
 
 - Python 3.11 or newer
-- No runtime packages outside the Python standard library
 - SQLite with WAL support (bundled with normal Python builds)
+- Core tracker and website: no third-party runtime packages
+- Optional source parsing: `pypdf`, `pywin32`, Microsoft Word, Poppler and Windows Media OCR as appropriate to the source format
 
 ## Install
 
@@ -53,6 +54,40 @@ python -m english_tracker ingest correct --event EVT-TO-REVERT --kind attempts -
 ```
 
 Every bulk import automatically creates an integrity-checked SQLite online backup. All writes use transactions. Repeating the same `event_id` or `idempotency_key` with the same payload is a no-op; reusing either identifier with a different payload fails loudly.
+
+## Local management hub
+
+```powershell
+$env:ENGLISH_TRACKER_QUESTION_BANK = 'C:\path\to\read-only-question-bank.sqlite'
+$env:ENGLISH_TRACKER_LIBRARY_ROOT = 'C:\path\to\source-library'
+python -m english_tracker serve --host 127.0.0.1 --port 8788 --open-browser
+```
+
+The local-only site visualizes project work, the verified question bank, evidence-weighted mastery, offline calibration, the source parsing ledger, deterministic dictation, and the three conversation contracts. Its API is the preferred handoff mechanism:
+
+- `/api/context/engineering`, `/api/context/courseware`, `/api/context/dictation`
+- `/api/grammar/questions/{question_id}` and `/api/grammar/passages/{passage_id}/coverage`
+- `/api/grammar/coverage-matrix?passage_id=...` and `POST /api/grammar/select-passages`
+- `POST /api/classroom/attempts`, `POST /api/dictation/results`
+- `/api/reports/weekly` and `/api/reports/trends`
+
+## Full source-library pipeline
+
+The pipeline never deletes or edits originals. It inventories all files, hashes exact duplicates, extracts supported text, converts legacy Word files into a private cache, reuses source-backed textbook OCR, groups prompt/answer/audio versions, and stages passages, questions, answers, RAG chunks, knowledge suggestions, and review tasks.
+
+```powershell
+python -m english_tracker library scan --root C:\path\to\source-library
+python -m english_tracker library hash
+python -m english_tracker library extract --limit 0
+python -m english_tracker library convert-doc --limit 100
+python -m english_tracker library pair
+python -m english_tracker library structure
+python -m english_tracker library propagate-duplicates
+python -m english_tracker library summary --output library-summary.json
+python -m english_tracker library structure-summary --output structure-summary.json
+```
+
+`structured` means text has been split into auditable objects. Audio marked `indexed` has been paired with its paper/script where possible; it does not claim a word-for-word transcript. Machine-created candidates stay in staging with `suggested`/`needs_check` status and cannot enter the verified question bank without review.
 
 ## Data contracts
 

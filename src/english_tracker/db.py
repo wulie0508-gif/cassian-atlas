@@ -35,6 +35,7 @@ def ensure_private_layout(data_dir: Path) -> dict[str, Path]:
         "backups": data_dir / "backups",
         "exports": data_dir / "exports",
         "logs": data_dir / "logs",
+        "library_cache": data_dir / "library_cache",
     }
     for path in paths.values():
         path.mkdir(parents=True, exist_ok=True)

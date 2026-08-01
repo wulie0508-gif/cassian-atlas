@@ -59,6 +59,33 @@ Question knowledge coverage and student error causes are different grains. A wro
 
 The authoritative evidence remains attempts and evaluation revisions. Review state and snapshots are derived and can be rebuilt.
 
+## Assessment calibration and project management
+
+| Table | Grain | Important fields |
+| --- | --- | --- |
+| `assessment_weight_policies` | One assessment-kind and delivery-mode weight | policy version, evidence weight, calibration-anchor flag and rationale |
+| `question_weight_rules` | One deterministic item/evidence multiplier rule | dimension, match value, multiplier, priority and rationale |
+| `workflow_channels` | One engineering/courseware/dictation contract | read source, write contract, context endpoint, current status |
+| `project_work_items` | One tracked deliverable | owner, status, completed/total units, evidence path and blocker |
+
+The effective attempt weight multiplies assessment environment, question difficulty, verification quality and answer-capture quality, then clamps the product to the published safe range. It never invents extra attempts.
+
+## Source-library parsing and staging
+
+| Table | Grain | Important fields |
+| --- | --- | --- |
+| `library_resources` | One physical source file | path, hash/duplicate lineage, subject scope, parse status, extraction cache and source verification |
+| `library_parse_runs` | One inventory/extract/OCR/structure run | mode, status, counts, options, summary and timing |
+| `library_source_sets` | One logical paper/book and its prompt/answer/audio variants | pairing status, preferred resources, candidate/chunk counts |
+| `library_source_set_resources` | One file membership in a logical source set | role, preferred flag and deterministic grouping rationale |
+| `library_text_chunks` | One provenance-preserving RAG chunk | heading, text, source locator, parser version and verification status |
+| `staged_passages` | One machine-split passage candidate | source set, text, question range/count, confidence and review status |
+| `staged_questions` | One machine-split question candidate | passage, type, stem/options/answer/explanation, source locator, confidence and review status |
+| `staged_question_knowledge_map` | One staged question-to-knowledge suggestion | role, mapping source, confidence, rationale and source snapshot |
+| `library_structure_reviews` | One unresolved/resolved structural issue | target resource/question, problem type, severity, detail and source locator |
+
+Staging rows are queryable for discovery but are not attempts and are not the verified question bank. `mapping_source=rule` or `model_suggested` stays unverified until an explicit human action.
+
 ## Ingestion, migration, and audit
 
 | Table | Grain | Important fields |
