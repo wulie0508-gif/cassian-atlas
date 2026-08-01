@@ -173,7 +173,7 @@ def migrate_legacy(
         with conn:
             created, existing = _begin_event(conn, payload, "legacy_migration", backup_path)
             if not created:
-                after_counts = {
+                current_counts = {
                     table: conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
                     for table in (
                         "content_items",
@@ -247,7 +247,18 @@ def migrate_legacy(
                         "linked_unique_entries": victor_links,
                         "duplicate_legacy_candidates_not_relinked": len(matched_entries) - len(set(matched_entries)),
                     },
-                    "target_counts_after_migration": after_counts,
+                    "target_counts_after_migration": {
+                        "content_items": legacy_counts["content_items"] + mastery_new_items,
+                        "attempts": legacy_counts["attempts"],
+                        "evaluations": legacy_counts["attempts"],
+                        "review_state": legacy_counts["review_state"],
+                        "review_tasks": legacy_counts["correction_tasks"],
+                        "external_references": legacy_counts["content_items"]
+                        + conn.execute("SELECT COUNT(*) FROM external_references WHERE namespace='mastery_json'").fetchone()[0]
+                        + victor_links,
+                        "legacy_records": current_counts["legacy_records"],
+                    },
+                    "target_counts_current": current_counts,
                     "existing": existing,
                 }
             if not conn.execute("SELECT 1 FROM students WHERE student_id=?", (student_id,)).fetchone():
