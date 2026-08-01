@@ -80,9 +80,72 @@ python -m english_tracker context export --student STU-001 --for courseware --ou
 
 Select only `verified` or `source_checked` question-bank content by default. Preserve passage grouping. A `tentative` weakness is a diagnostic retest target, not a stable diagnosis.
 
+## Courseware conversation: query one question's knowledge points
+
+```powershell
+python -m english_tracker knowledge question --question Q-EXAMPLE-001 --output question-knowledge.json
+```
+
+Read `mappings[].role`, `mapping_source`, `confidence`, `verification_status`, and `rationale`. Use `source_checked`/`verified` mappings as confirmed evidence. Treat `rule` or `model_suggested` rows with `verification_status=suggested` as review candidates only. The database rejects any attempt to auto-promote `model_suggested` to `source_checked` or `verified`.
+
+## Courseware conversation: query a passage or a coverage matrix
+
+One complete passage:
+
+```powershell
+python -m english_tracker knowledge passage --passage PAS-EXAMPLE-001 --output passage-coverage.json
+```
+
+Several complete passages, with a CSV that opens directly in Excel:
+
+```powershell
+python -m english_tracker knowledge matrix `
+  --passages PAS-EXAMPLE-001 PAS-EXAMPLE-002 `
+  --minimum 2 `
+  --csv passage-matrix.csv `
+  --output passage-matrix.json
+```
+
+The matrix keeps confirmed and suggested counts separate. Its default curriculum coverage list includes sentence backbone/predicate count, tense/voice/agreement/modals, fine non-finite forms and reasoning, derivation/inflection, determiners and prepositions, clause types/connectors, and special structures. `uncovered` means no mapping; `insufficient` includes only one confirmed item or suggested-only evidence.
+
+## Courseware conversation: automatically select complete passages
+
+```powershell
+python -m english_tracker select passages `
+  --knowledge tense noun_clause preposition_collocation non_finite_voice `
+  --student STU-001 `
+  --days 30 `
+  --max-passages 5 `
+  --output selected-passages.json
+```
+
+This is weighted greedy set-cover. Explicit targets start with the same base weight; recent wrong/partial attempts add a recency-weighted bonus. One-error evidence is labeled `tentative`. Candidates are restricted to complete `source_checked` passages and the selector returns whole `passage_id` values—never isolated blanks. Suggested mappings receive reduced selection value and remain `suggested_only` in the result.
+
 ## Courseware conversation: record classroom attempts
 
 Create the session first, then send one attempts batch. For a new question-bank item, include a minimal item snapshot and a question reference:
+
+```powershell
+python -m english_tracker session import --input classroom-session.json
+python -m english_tracker attempts import --input classroom-attempts.json
+```
+
+`classroom-attempts.json` is one idempotent envelope; put every classroom response row in its `attempts` array:
+
+```json
+{
+  "event_id": "EVT-COURSE-ATTEMPTS-001",
+  "idempotency_key": "courseware:attempts:001",
+  "source_thread": "courseware",
+  "student_id": "STU-001",
+  "session_id": "SES-COURSE-001",
+  "attempts": [
+    "REPLACE_WITH_ATTEMPT_OBJECTS_SHOWN_BELOW"
+  ]
+}
+```
+
+Replace the placeholder with JSON objects (not a quoted string). The following is one attempt object:
 
 ```json
 {
@@ -94,7 +157,7 @@ Create the session first, then send one attempts batch. For a new question-bank 
   "response_mode": "production",
   "validation_status": "source_checked",
   "evaluation": {"result": "wrong", "score": 0, "max_score": 1, "evaluated_by": "teacher"},
-  "error_types": [{"code": "clause_connector_error", "raw_error_type": "teacher wording"}],
+  "error_types": [],
   "item": {
     "domain": "grammar",
     "item_type": "cloze",
@@ -113,6 +176,37 @@ Create the session first, then send one attempts batch. For a new question-bank 
   }
 }
 ```
+
+The example deliberately has no `error_types`: because the original response was not captured, the system may store the known `wrong` result but must not infer a specific cause from the standard answer. Question knowledge mappings and student error-cause mappings are separate tables and separate evidence claims.
+
+For a scored activity, classify the session when it is created:
+
+```json
+{
+  "event_id": "EVT-COURSE-SESSION-001",
+  "idempotency_key": "courseware:session:001",
+  "source_thread": "courseware",
+  "student_id": "STU-001",
+  "session": {
+    "session_id": "SES-COURSE-001",
+    "session_type": "test",
+    "title": "Grammar topic quiz",
+    "started_at": "2026-08-02T10:00:00+08:00"
+  },
+  "assessment": {
+    "assessment_kind": "topic_quiz",
+    "reporting_series": "grammar-fill",
+    "delivery_mode": "offline_closed",
+    "raw_score": 8,
+    "max_score": 10,
+    "duration_seconds": 900,
+    "blank_count": 0,
+    "validation_status": "verified"
+  }
+}
+```
+
+Use `assessment_kind=biweekly_mixed_test` for the two-week closed mixed test and `assessment_kind=full_exam` for a formal full paper. Do not label an ordinary lesson as a formal exam.
 
 Record broad classroom feedback in the session payload's `observations`; do not create fake item attempts.
 
@@ -136,6 +230,25 @@ python -m english_tracker progress import --input progress.json
 }
 ```
 
+## Courseware conversation: generate weekly and trend data
+
+```powershell
+python -m english_tracker report weekly `
+  --student STU-001 `
+  --week-start 2026-07-27 `
+  --output weekly-report.json
+
+python -m english_tracker report trends `
+  --student STU-001 `
+  --start 2026-07-01 `
+  --end 2026-12-31 `
+  --output trend-report.json
+```
+
+The weekly report returns topic-quiz accuracy, measured completion time, blank rate, not-captured count, retest recovery, and knowledge-point accuracy with attempt/item sample sizes. A knowledge point with exactly one error remains `tentative`.
+
+Trend output partitions every raw-score series by `assessment_kind + reporting_series + max_score`; topic quizzes and formal papers, or tests with different maximum scores, are never connected as one raw-score line. Schedule checks report biweekly offline mixed tests, four-week offline full papers, and the December-onward target of one to two full papers per week.
+
 ## Engineering conversation: migrate, check, back up, and repair
 
 ```powershell
@@ -143,6 +256,12 @@ python -m english_tracker backup --reason before-migration
 python -m english_tracker migrate legacy --student STU-001 --legacy-db OLD.sqlite --mastery-json items.json --victor-db vocab.sqlite
 python -m english_tracker data check
 python -m english_tracker info
+```
+
+Synchronize the source-checked grammar catalog only from a read-only question-bank path. The command creates a source hash snapshot, repairs reversible tag mojibake in the normalized field, retains the raw label, and does not copy stems or answers into the catalog:
+
+```powershell
+python -m english_tracker knowledge sync --question-bank QUESTION_BANK.sqlite --output grammar-sync.json
 ```
 
 Undo a bad import while retaining all evidence:
@@ -158,4 +277,3 @@ python -m english_tracker ingest correct --event EVT-BAD-IMPORT --kind attempts 
 ```
 
 After any correction, run `data check` and regenerate both context exports.
-

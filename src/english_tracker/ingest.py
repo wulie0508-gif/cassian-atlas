@@ -98,6 +98,7 @@ def import_session(conn, payload: dict, *, backup_path: str | None = None) -> di
     observations = payload.get("observations", [])
     progress = payload.get("progress", [])
     artifact = payload.get("artifact")
+    assessment = payload.get("assessment")
     with conn:
         created, existing = _begin_event(conn, payload, "session_import", backup_path)
         if not created:
@@ -156,6 +157,30 @@ def import_session(conn, payload: dict, *, backup_path: str | None = None) -> di
             ),
         )
         _record_event_row(conn, event_id, "learning_session", session["session_id"], "insert", session)
+        if assessment:
+            conn.execute(
+                """
+                INSERT INTO session_assessments(
+                  session_id, assessment_kind, reporting_series, delivery_mode,
+                  raw_score, max_score, duration_seconds, blank_count,
+                  validation_status, created_by_event_id, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session["session_id"],
+                    assessment["assessment_kind"],
+                    assessment["reporting_series"],
+                    assessment.get("delivery_mode", "unspecified"),
+                    assessment.get("raw_score"),
+                    assessment.get("max_score"),
+                    assessment.get("duration_seconds"),
+                    assessment.get("blank_count"),
+                    assessment.get("validation_status", "unverified"),
+                    event_id,
+                    now,
+                ),
+            )
+            _record_event_row(conn, event_id, "session_assessment", session["session_id"], "insert", assessment)
         for index, observation in enumerate(observations, start=1):
             observation_id = observation.get("observation_id") or stable_id("OBS", event_id, index)
             conn.execute(
@@ -179,8 +204,8 @@ def import_session(conn, payload: dict, *, backup_path: str | None = None) -> di
         inserted_progress = _insert_progress_rows(
             conn, event_id, session["session_id"], progress, now
         )
-        total = 1 + bool(artifact) + len(observations) + len(progress)
-        _finish_event(conn, event_id, total, 1 + int(bool(artifact)) + len(observations) + inserted_progress)
+        total = 1 + bool(artifact) + bool(assessment) + len(observations) + len(progress)
+        _finish_event(conn, event_id, total, 1 + int(bool(artifact)) + int(bool(assessment)) + len(observations) + inserted_progress)
     return {"status": "applied", "event_id": event_id, "session_id": session["session_id"]}
 
 
@@ -359,16 +384,18 @@ def _resolve_item(conn, attempt: dict, ingest_event_id: str, now: str) -> tuple[
             """
             INSERT OR IGNORE INTO item_knowledge_map(
               item_id, knowledge_point_id, mapping_role, weight,
-              evidence_source, validation_status
-            ) VALUES (?, ?, ?, ?, ?, ?)
+              mapping_source, confidence, verification_status, rationale
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 item_id,
                 row["knowledge_point_id"],
                 role,
                 weight,
-                kp.get("evidence_source") if isinstance(kp, dict) else "import_contract",
-                kp.get("validation_status", "unverified") if isinstance(kp, dict) else "unverified",
+                kp.get("mapping_source", "manual") if isinstance(kp, dict) else "manual",
+                kp.get("confidence", 1.0) if isinstance(kp, dict) else 1.0,
+                kp.get("verification_status", kp.get("validation_status", "unverified")) if isinstance(kp, dict) else "unverified",
+                kp.get("rationale", kp.get("evidence_source")) if isinstance(kp, dict) else "Imported through the stable attempt contract.",
             ),
         )
     return item_id, inserted
@@ -572,10 +599,20 @@ def import_attempts(conn, payload: dict, *, backup_path: str | None = None) -> d
                 conn.execute(
                     """
                     INSERT INTO attempt_error_map(
-                      attempt_id, error_type_id, raw_error_type, confidence, note
-                    ) VALUES (?, ?, ?, ?, ?)
+                      attempt_id, error_type_id, raw_error_type, confidence, note,
+                      error_source, verification_status, rationale, record_status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
                     """,
-                    (attempt_id, error_type_id, raw, confidence, note),
+                    (
+                        attempt_id,
+                        error_type_id,
+                        raw,
+                        confidence,
+                        note,
+                        error.get("error_source", "manual") if isinstance(error, dict) else "manual",
+                        error.get("verification_status", "unverified") if isinstance(error, dict) else "unverified",
+                        error.get("rationale") if isinstance(error, dict) else None,
+                    ),
                 )
             _upsert_review_state(
                 conn,
@@ -620,6 +657,14 @@ def undo_ingest_event(conn, target_event_id: str, *, actor: str = "engineering",
         before = dict(event)
         now = utc_now()
         conn.execute("UPDATE attempts SET record_status='voided' WHERE ingest_event_id=?", (target_event_id,))
+        conn.execute(
+            """
+            UPDATE attempt_error_map SET record_status='voided',
+              invalidation_reason=COALESCE(invalidation_reason, 'Parent attempt ingest event was reverted.')
+            WHERE attempt_id IN (SELECT attempt_id FROM attempts WHERE ingest_event_id=?)
+            """,
+            (target_event_id,),
+        )
         conn.execute("UPDATE learning_sessions SET record_status='voided', updated_at=? WHERE created_by_event_id=?", (now, target_event_id))
         conn.execute("UPDATE session_observations SET record_status='voided' WHERE created_by_event_id=?", (target_event_id,))
         conn.execute("UPDATE session_progress SET record_status='voided' WHERE created_by_event_id=?", (target_event_id,))

@@ -73,8 +73,8 @@ def _insert_kp_links(conn, item_id: str, codes: list[str], evidence: str) -> Non
             """
             INSERT OR IGNORE INTO item_knowledge_map(
               item_id, knowledge_point_id, mapping_role, weight,
-              evidence_source, validation_status
-            ) VALUES (?, ?, ?, 1.0, ?, 'source_checked')
+              mapping_source, confidence, verification_status, rationale
+            ) VALUES (?, ?, ?, 1.0, 'legacy', 1.0, 'source_checked', ?)
             """,
             (item_id, row["knowledge_point_id"], "primary" if index == 0 else "secondary", evidence),
         )
@@ -445,10 +445,11 @@ def migrate_legacy(
                     conn.execute(
                         """
                         INSERT INTO attempt_error_map(
-                          attempt_id,error_type_id,raw_error_type,confidence,note
-                        ) VALUES (?,?,?,?,?)
+                          attempt_id,error_type_id,raw_error_type,confidence,note,
+                          error_source,verification_status,rationale,record_status
+                        ) VALUES (?,?,?,?,?,'legacy','unverified',?,'active')
                         """,
-                        (attempt_id, error_type_id, raw, confidence, note),
+                        (attempt_id, error_type_id, raw, confidence, note, note),
                     )
                 _insert_legacy_record(
                     conn, event_id, "legacy_review", "attempt", str(row["attempt_id"]), row,

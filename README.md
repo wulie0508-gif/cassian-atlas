@@ -6,7 +6,7 @@ A privacy-first, local-first learning record system for vocabulary, grammar, rea
 
 This repository contains only code, migrations, schemas, tests, and anonymous examples. It must not contain student names, student answers, scores, original test papers, databases, backups, or machine-specific paths.
 
-The private data directory contains the real SQLite database, import inboxes, backups, exports, and logs. External question banks and calibrated vocabulary databases stay read-only and are referenced by stable IDs. Question-bank content is not copied wholesale; only used items receive a minimal snapshot.
+The private data directory contains the real SQLite database, import inboxes, backups, exports, and logs. External question banks and calibrated vocabulary databases stay read-only and are referenced by stable IDs. Question-bank content is not copied wholesale. The grammar catalog stores IDs, source metadata, raw/normalized tags, and mappings—but no stem or answer text; actually used items may receive a minimal historical snapshot.
 
 ## Requirements
 
@@ -37,6 +37,15 @@ python -m english_tracker review due --student STU-001
 python -m english_tracker context export --student STU-001 --for courseware
 python -m english_tracker context export --student STU-001 --for dictation
 
+python -m english_tracker knowledge sync --question-bank QUESTION_BANK.sqlite
+python -m english_tracker knowledge question --question Q-EXAMPLE-001
+python -m english_tracker knowledge passage --passage PAS-EXAMPLE-001
+python -m english_tracker knowledge matrix --passages PAS-EXAMPLE-001 PAS-EXAMPLE-002 --csv matrix.csv
+python -m english_tracker select passages --knowledge tense noun_clause --student STU-001
+
+python -m english_tracker report weekly --student STU-001 --week-start 2026-01-12
+python -m english_tracker report trends --student STU-001 --start 2026-01-01 --end 2026-03-31
+
 python -m english_tracker data check
 python -m english_tracker backup --reason before-manual-change
 python -m english_tracker ingest undo --event EVT-TO-REVERT --reason 'operator correction'
@@ -62,6 +71,14 @@ The score combines error rate, sample size, recency, consecutive errors, latest 
 - Errors remain linked to attempt IDs and evidence items.
 - Session observations never become fabricated item errors.
 - `answer_capture_status = not_captured` is distinct from a captured blank answer.
+- No specific error cause may be attached to `not_captured`; the known evaluation result remains valid evidence, while error-cause inference is rejected.
+- Rule/model knowledge mappings remain suggestions until a human verifies them; model suggestions cannot be auto-promoted by database constraint.
+
+## Grammar coverage and measurement
+
+The source-checked grammar catalog is versioned by source SHA-256. A hierarchical knowledge tree supports primary, secondary, prerequisite, and trap mappings. Passage selection uses weighted greedy set-cover over complete source-checked passages and incorporates recent wrong/partial evidence without splitting passages.
+
+Weekly reports include topic accuracy, measured duration, blank rate, not-captured count, retest recovery, and knowledge-point accuracy with sample size. Trend exports partition raw scores by assessment kind, reporting series, and maximum score, so unlike totals are never connected. Schedule checks cover biweekly closed mixed tests, four-week full papers, and the December-onward weekly full-paper target.
 
 The first scheduler is deliberately conservative (`simple-v1`). Historical FSRS state is preserved during migration, but this project does not claim FSRS compatibility until a versioned adapter is implemented and validated.
 
@@ -97,4 +114,3 @@ See [ARCHITECTURE.md](ARCHITECTURE.md), [data dictionary](docs/DATA_DICTIONARY.m
 ## License
 
 MIT. The repository has no third-party runtime dependency. Student data and external question/vocabulary content are outside the license scope because they are not distributed with the repository.
-

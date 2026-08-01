@@ -9,6 +9,13 @@
     "title": "Anonymous vocabulary review",
     "started_at": "2026-01-15T09:00:00+08:00"
   },
+  "assessment": {
+    "assessment_kind": "dictation",
+    "reporting_series": "weekly-vocabulary-dictation",
+    "delivery_mode": "offline_closed",
+    "duration_seconds": 1200,
+    "validation_status": "verified"
+  },
   "observations": [
     {
       "observation_type": "teacher_observation",
@@ -17,4 +24,3 @@
     }
   ]
 }
-

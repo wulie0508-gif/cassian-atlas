@@ -18,7 +18,9 @@ flowchart LR
     DB --> W["Weakness reports"]
     DB --> R["Due-review queues"]
     DB --> X["Context exports"]
-    QB[("Read-only question bank")] -. "external IDs" .-> DB
+    DB --> M["Weekly and separated trend metrics"]
+    DB --> S["Weighted complete-passage set-cover"]
+    QB[("Read-only question bank")] -->|"hashed metadata/mapping snapshot"| DB
     VV[("Read-only calibrated vocabulary")] -. "external IDs" .-> DB
     OLD[("Read-only legacy sources")] -->|"repeatable migration"| I
 ```
@@ -31,12 +33,18 @@ erDiagram
     LEARNING_SESSIONS ||--o{ ATTEMPTS : contains
     LEARNING_SESSIONS ||--o{ SESSION_OBSERVATIONS : records
     LEARNING_SESSIONS ||--o{ SESSION_PROGRESS : tracks
+    LEARNING_SESSIONS ||--o| SESSION_ASSESSMENTS : classifies
     ARTIFACTS ||--o{ LEARNING_SESSIONS : supports
     CONTENT_ITEMS ||--o{ ATTEMPTS : attempted_as
     CONTENT_ITEMS ||--o{ EXTERNAL_REFERENCES : points_to
     CONTENT_ITEMS ||--o{ ITEM_KNOWLEDGE_MAP : tagged_by
     KNOWLEDGE_POINTS ||--o{ ITEM_KNOWLEDGE_MAP : classifies
     KNOWLEDGE_POINTS ||--o{ KNOWLEDGE_POINTS : parent_of
+    SOURCE_SNAPSHOTS ||--o{ GRAMMAR_PASSAGE_CATALOG : versions
+    SOURCE_SNAPSHOTS ||--o{ GRAMMAR_QUESTION_CATALOG : versions
+    GRAMMAR_PASSAGE_CATALOG ||--o{ GRAMMAR_QUESTION_CATALOG : contains
+    GRAMMAR_QUESTION_CATALOG ||--o{ QUESTION_KNOWLEDGE_MAP : tagged_by
+    KNOWLEDGE_POINTS ||--o{ QUESTION_KNOWLEDGE_MAP : classifies
     ATTEMPTS ||--o{ EVALUATIONS : revised_by
     ATTEMPTS ||--o{ ATTEMPT_ERROR_MAP : exhibits
     ERROR_TYPES ||--o{ ATTEMPT_ERROR_MAP : normalizes
@@ -58,6 +66,18 @@ erDiagram
 - One current evaluation is enforced by a partial unique index.
 - One open review task per student/item is enforced by a partial unique index.
 - Automated imports never overwrite an existing item snapshot or manual review-state override.
+- A `model_suggested` question/item mapping cannot be `source_checked` or `verified`; manual promotion is an explicit later action.
+- `not_captured` attempts cannot carry an active specific error-cause mapping. Historical violations are retained as voided/rejected audit evidence.
+
+## Grammar catalog and selection
+
+`knowledge sync` hashes the read-only source and snapshots only source-checked grammar metadata. It keeps stable question/passage/source IDs, availability flags, raw and normalized legacy tags, and normalized mappings. Stems and answer text remain in the external source. Reversible Latin-1/GBK tag corruption is repaired only in normalized fields; raw values remain auditable.
+
+Legacy tag mappings can be confirmed source coverage. Rule and model outputs remain suggestions. The weighted greedy set-cover selector scores explicit targets plus recency-weighted recent errors, discounts suggestions, and admits only complete source-checked passages. It never returns an isolated blank.
+
+## Measurement model
+
+`session_assessments` classifies a session as lesson, topic quiz, biweekly mixed test, full exam, dictation, homework, or other. Weekly metrics expose denominators for accuracy, blank rate, retest recovery, and knowledge-point performance. Raw score series are keyed by assessment kind, reporting series, and maximum score; different totals are not joined. Schedule compliance is calculated separately from observed outcomes.
 
 ## Weakness model (`weakness-v1`)
 
@@ -81,6 +101,6 @@ The repository contains no private configuration. Runtime selection uses `ENGLIS
 
 - `simple-v1` is not an FSRS implementation. The schema can retain stability/difficulty fields for a future adapter.
 - Knowledge mapping imported from old free-text tags is deterministic but still marked by its evidence source.
+- Fine-grained rule mappings are provisional until manually reviewed; coverage reports separate confirmed and suggested counts.
 - The MVP uses SQLite and a local CLI, not a network service or multi-user authorization layer.
 - Timestamps are stored as ISO-8601 text; producers should include a timezone offset.
-

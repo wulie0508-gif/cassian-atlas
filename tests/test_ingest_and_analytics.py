@@ -60,7 +60,8 @@ class TrackerIntegrationTest(unittest.TestCase):
                     "answer_capture_status": "not_captured",
                     "response_mode": "production",
                     "evaluation": {"result": result, "score": 1 if result == "correct" else 0, "max_score": 1},
-                    "error_types": [] if result == "correct" else ["blank"],
+                    # The original answer is not captured, so no specific error cause is inferred.
+                    "error_types": [],
                     "item": {
                         "domain": "grammar",
                         "item_type": "cloze",
@@ -113,4 +114,3 @@ class TrackerIntegrationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

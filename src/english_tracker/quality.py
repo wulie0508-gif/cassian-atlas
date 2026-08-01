@@ -90,6 +90,71 @@ def run_quality_checks(conn) -> dict[str, Any]:
         "Correct the capture status or answer through an audited replacement import.",
     )
     add(
+        "not_captured_has_no_specific_error_cause",
+        "high",
+        _count(
+            conn,
+            """
+            SELECT COUNT(*) FROM attempt_error_map aem
+            JOIN attempts a ON a.attempt_id=aem.attempt_id
+            WHERE a.answer_capture_status='not_captured' AND aem.record_status='active'
+            """,
+        ),
+        "No specific student error cause is inferred without the original answer",
+        "Void the inferred error mapping and retain only wrong/partial plus answer_capture_status=not_captured.",
+    )
+    add(
+        "model_mapping_verification_guard",
+        "critical",
+        _count(
+            conn,
+            """
+            SELECT
+              (SELECT COUNT(*) FROM question_knowledge_map
+               WHERE mapping_source='model_suggested' AND verification_status IN ('source_checked','verified'))
+              +
+              (SELECT COUNT(*) FROM item_knowledge_map
+               WHERE mapping_source='model_suggested' AND verification_status IN ('source_checked','verified'))
+            """,
+        ),
+        "Model-suggested knowledge mappings are never auto-verified",
+        "Downgrade the mapping to suggested and require explicit manual verification.",
+    )
+    add(
+        "grammar_snapshot_catalog_reconciliation",
+        "high",
+        _count(
+            conn,
+            """
+            SELECT COUNT(*) FROM source_snapshots s
+            WHERE s.is_current=1 AND (
+              s.question_count<>(SELECT COUNT(*) FROM grammar_question_catalog q WHERE q.source_snapshot_id=s.source_snapshot_id)
+              OR s.passage_count<>(SELECT COUNT(*) FROM grammar_passage_catalog p WHERE p.source_snapshot_id=s.source_snapshot_id)
+            )
+            """,
+        ),
+        "Current grammar snapshot row counts reconcile to its catalogs",
+        "Repeat the read-only knowledge sync after backing up the unified database.",
+    )
+    add(
+        "grammar_questions_have_mapping",
+        "medium",
+        _count(
+            conn,
+            """
+            SELECT COUNT(*) FROM grammar_question_catalog q
+            JOIN source_snapshots s ON s.source_snapshot_id=q.source_snapshot_id AND s.is_current=1
+            WHERE NOT EXISTS (
+              SELECT 1 FROM question_knowledge_map qkm
+              WHERE qkm.source_snapshot_id=q.source_snapshot_id AND qkm.question_id=q.question_id
+                AND qkm.verification_status<>'rejected'
+            )
+            """,
+        ),
+        "Every current grammar question has at least one non-rejected knowledge mapping",
+        "Add a legacy/manual mapping or mark the source record needs_check.",
+    )
+    add(
         "open_review_task_uniqueness",
         "high",
         _count(conn, "SELECT COUNT(*) FROM (SELECT student_id,item_id FROM review_tasks WHERE status='open' GROUP BY student_id,item_id HAVING COUNT(*)>1)"),
@@ -137,6 +202,11 @@ def run_quality_checks(conn) -> dict[str, Any]:
             "review_tasks",
             "ingest_events",
             "legacy_records",
+            "source_snapshots",
+            "grammar_passage_catalog",
+            "grammar_question_catalog",
+            "question_knowledge_map",
+            "session_assessments",
         )
     }
     severity_order = {"critical": 4, "high": 3, "medium": 2, "low": 1}

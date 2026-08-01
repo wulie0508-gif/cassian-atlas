@@ -43,6 +43,28 @@ class ContractUnitTest(unittest.TestCase):
         with self.assertRaises(ContractError):
             validate_attempts_payload(payload)
 
+    def test_not_captured_rejects_inferred_error_type(self):
+        payload = {
+            "event_id": "EVT-1",
+            "idempotency_key": "KEY-1",
+            "source_thread": "courseware",
+            "student_id": "STU-001",
+            "session_id": "SES-1",
+            "attempts": [
+                {
+                    "event_id": "ATT-1",
+                    "attempted_at": "2026-01-01",
+                    "item_id": "ITEM-1",
+                    "student_answer": None,
+                    "answer_capture_status": "not_captured",
+                    "evaluation": {"result": "wrong"},
+                    "error_types": ["clause connector error"],
+                }
+            ],
+        }
+        with self.assertRaises(ContractError):
+            validate_attempts_payload(payload)
+
 
 class RepositoryPrivacyTest(unittest.TestCase):
     def test_public_text_files_do_not_contain_private_identifiers(self):

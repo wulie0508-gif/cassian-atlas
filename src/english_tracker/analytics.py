@@ -84,7 +84,7 @@ def _attempt_rows(conn, student_id: str, as_of: datetime, start: datetime | None
         FROM attempts a
         JOIN evaluations e ON e.attempt_id=a.attempt_id AND e.is_current=1
         JOIN content_items ci ON ci.item_id=a.item_id AND ci.record_status='active'
-        JOIN item_knowledge_map ikm ON ikm.item_id=a.item_id
+        JOIN item_knowledge_map ikm ON ikm.item_id=a.item_id AND ikm.verification_status<>'rejected'
         JOIN knowledge_points kp ON kp.knowledge_point_id=ikm.knowledge_point_id
         WHERE a.student_id=? AND a.record_status='active' AND a.attempted_at<=?
     """
@@ -260,7 +260,7 @@ def session_acceptance_report(conn, session_id: str) -> dict[str, Any]:
             SELECT kp.code,kp.name_cn,COUNT(*) error_count,COUNT(DISTINCT a.item_id) item_count
             FROM attempts a
             JOIN evaluations e ON e.attempt_id=a.attempt_id AND e.is_current=1
-            JOIN item_knowledge_map ikm ON ikm.item_id=a.item_id
+            JOIN item_knowledge_map ikm ON ikm.item_id=a.item_id AND ikm.verification_status<>'rejected'
             JOIN knowledge_points kp ON kp.knowledge_point_id=ikm.knowledge_point_id
             WHERE a.session_id=? AND a.record_status='active'
               AND e.result IN ('wrong','partial') AND kp.code NOT IN ('vocabulary','grammar','reading','translation','writing')
@@ -320,4 +320,3 @@ def export_context(conn, student_id: str, audience: str, *, as_of: str | None = 
             "prioritize_error_types": ["active_recall_failure", "spelling_error", "fixed_phrase_missing", "near_synonym_substitution"],
         }
     return result
-

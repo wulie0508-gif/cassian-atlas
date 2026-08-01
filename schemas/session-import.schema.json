@@ -38,6 +38,27 @@
         "note": {"type": ["string", "null"]}
       }
     },
+    "assessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assessment_kind", "reporting_series"],
+      "properties": {
+        "assessment_kind": {"enum": ["lesson", "topic_quiz", "biweekly_mixed_test", "full_exam", "dictation", "homework", "other"]},
+        "reporting_series": {"type": "string", "minLength": 1},
+        "delivery_mode": {"enum": ["offline_closed", "offline_open", "online", "home", "unspecified"]},
+        "raw_score": {"type": ["number", "null"], "minimum": 0},
+        "max_score": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "duration_seconds": {"type": ["integer", "null"], "minimum": 0},
+        "blank_count": {"type": ["integer", "null"], "minimum": 0},
+        "validation_status": {"enum": ["verified", "source_checked", "unverified", "needs_check"]}
+      },
+      "allOf": [
+        {
+          "if": {"required": ["raw_score"]},
+          "then": {"required": ["max_score"]}
+        }
+      ]
+    },
     "observations": {
       "type": "array",
       "items": {
@@ -57,4 +78,3 @@
     }
   }
 }
-

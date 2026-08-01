@@ -42,7 +42,10 @@
                     "code": {"type": "string"},
                     "raw_error_type": {"type": "string"},
                     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                    "note": {"type": "string"}
+                    "note": {"type": "string"},
+                    "error_source": {"enum": ["student_answer", "teacher_observation", "manual", "legacy", "rule", "model_suggested"]},
+                    "verification_status": {"enum": ["suggested", "source_checked", "verified", "needs_check", "rejected", "unverified"]},
+                    "rationale": {"type": "string"}
                   }
                 }
               ]
@@ -61,7 +64,21 @@
             }
           },
           "item": {"$ref": "#/$defs/item"}
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": ["answer_capture_status"],
+              "properties": {"answer_capture_status": {"const": "not_captured"}}
+            },
+            "then": {
+              "properties": {
+                "student_answer": {"type": "null"},
+                "error_types": {"maxItems": 0}
+              }
+            }
+          }
+        ]
       }
     }
   },
@@ -97,7 +114,19 @@
           "items": {
             "oneOf": [
               {"type": "string"},
-              {"type": "object", "required": ["code"], "properties": {"code": {"type": "string"}, "role": {"type": "string"}, "weight": {"type": "number"}, "evidence_source": {"type": "string"}, "validation_status": {"type": "string"}}}
+              {
+                "type": "object",
+                "required": ["code"],
+                "properties": {
+                  "code": {"type": "string"},
+                  "role": {"enum": ["primary", "secondary", "prerequisite", "trap"]},
+                  "weight": {"type": "number", "exclusiveMinimum": 0},
+                  "mapping_source": {"enum": ["legacy", "rule", "model_suggested", "manual"]},
+                  "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                  "verification_status": {"enum": ["suggested", "source_checked", "verified", "needs_check", "unverified", "rejected"]},
+                  "rationale": {"type": "string"}
+                }
+              }
             ]
           }
         },
@@ -107,4 +136,3 @@
     }
   }
 }
-

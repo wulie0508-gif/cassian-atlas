@@ -19,8 +19,11 @@ from .db import (
     resolve_data_dir,
 )
 from .ingest import IngestConflict, import_attempts, import_progress, import_session, undo_ingest_event
+from .grammar_catalog import coverage_matrix, passage_coverage, question_knowledge, sync_grammar_catalog, write_coverage_csv
 from .migrate_legacy import migrate_legacy
+from .metrics import trend_report, weekly_report
 from .quality import quality_markdown, run_quality_checks
+from .selection import weighted_set_cover
 from .util import read_json, write_json
 
 
@@ -46,7 +49,10 @@ def _backup(data_dir: Path, reason: str) -> str | None:
 
 
 def cmd_init(args) -> int:
-    result = initialize_database(_data_dir(args), student_id=args.student, display_name=args.display_name)
+    data_dir = _data_dir(args)
+    backup = _backup(data_dir, "pre-schema-migration") if database_path(data_dir).exists() else None
+    result = initialize_database(data_dir, student_id=args.student, display_name=args.display_name)
+    result["pre_migration_backup"] = backup
     _emit(result)
     return 0
 
@@ -120,6 +126,95 @@ def cmd_session_report(args) -> int:
     _, conn = _open(args)
     try:
         result = session_acceptance_report(conn, args.session)
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_knowledge_sync(args) -> int:
+    data_dir, conn = _open(args)
+    backup = _backup(data_dir, "grammar-catalog-sync")
+    try:
+        result = sync_grammar_catalog(conn, args.question_bank)
+    finally:
+        conn.close()
+    result["backup"] = backup
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_knowledge_question(args) -> int:
+    _, conn = _open(args)
+    try:
+        result = question_knowledge(conn, args.question, snapshot_id=args.snapshot)
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_knowledge_passage(args) -> int:
+    _, conn = _open(args)
+    try:
+        result = passage_coverage(conn, args.passage, snapshot_id=args.snapshot)
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_knowledge_matrix(args) -> int:
+    _, conn = _open(args)
+    try:
+        options = {
+            "snapshot_id": args.snapshot,
+            "minimum_confirmed_questions": args.minimum,
+        }
+        if args.knowledge:
+            options["required_codes"] = args.knowledge
+        result = coverage_matrix(conn, args.passages, **options)
+    finally:
+        conn.close()
+    if args.csv:
+        write_coverage_csv(result, args.csv)
+        result["csv_output"] = str(Path(args.csv).resolve())
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_select_passages(args) -> int:
+    _, conn = _open(args)
+    try:
+        result = weighted_set_cover(
+            conn,
+            args.knowledge,
+            student_id=args.student,
+            recent_error_days=args.days,
+            max_passages=args.max_passages,
+            as_of=args.as_of,
+            snapshot_id=args.snapshot,
+        )
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_weekly_report(args) -> int:
+    _, conn = _open(args)
+    try:
+        result = weekly_report(conn, args.student, week_start=args.week_start, as_of=args.as_of)
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_trend_report(args) -> int:
+    _, conn = _open(args)
+    try:
+        result = trend_report(conn, args.student, start=args.start, end=args.end)
     finally:
         conn.close()
     _emit(result, args.output)
@@ -278,6 +373,58 @@ def build_parser() -> argparse.ArgumentParser:
     context_export.add_argument("--output")
     context_export.set_defaults(func=cmd_context)
 
+    knowledge = sub.add_parser("knowledge", help="Grammar knowledge catalog and coverage")
+    knowledge_sub = knowledge.add_subparsers(dest="knowledge_command", required=True)
+    knowledge_sync = knowledge_sub.add_parser("sync", help="Snapshot source_checked grammar metadata and mappings")
+    knowledge_sync.add_argument("--question-bank", required=True)
+    knowledge_sync.add_argument("--output")
+    knowledge_sync.set_defaults(func=cmd_knowledge_sync)
+    knowledge_question = knowledge_sub.add_parser("question", help="Query one question's knowledge mappings")
+    knowledge_question.add_argument("--question", required=True)
+    knowledge_question.add_argument("--snapshot")
+    knowledge_question.add_argument("--output")
+    knowledge_question.set_defaults(func=cmd_knowledge_question)
+    knowledge_passage = knowledge_sub.add_parser("passage", help="Query one complete passage's coverage")
+    knowledge_passage.add_argument("--passage", required=True)
+    knowledge_passage.add_argument("--snapshot")
+    knowledge_passage.add_argument("--output")
+    knowledge_passage.set_defaults(func=cmd_knowledge_passage)
+    knowledge_matrix = knowledge_sub.add_parser("matrix", help="Build a multi-passage coverage matrix")
+    knowledge_matrix.add_argument("--passages", nargs="+", required=True)
+    knowledge_matrix.add_argument("--knowledge", nargs="+")
+    knowledge_matrix.add_argument("--minimum", type=int, default=2)
+    knowledge_matrix.add_argument("--snapshot")
+    knowledge_matrix.add_argument("--csv")
+    knowledge_matrix.add_argument("--output")
+    knowledge_matrix.set_defaults(func=cmd_knowledge_matrix)
+
+    select = sub.add_parser("select", help="Automatic content selection")
+    select_sub = select.add_subparsers(dest="select_command", required=True)
+    select_passages = select_sub.add_parser("passages", help="Weighted set-cover over complete passages")
+    select_passages.add_argument("--knowledge", nargs="+", required=True)
+    select_passages.add_argument("--student")
+    select_passages.add_argument("--days", type=int, default=30)
+    select_passages.add_argument("--max-passages", type=int, default=5)
+    select_passages.add_argument("--as-of")
+    select_passages.add_argument("--snapshot")
+    select_passages.add_argument("--output")
+    select_passages.set_defaults(func=cmd_select_passages)
+
+    report = sub.add_parser("report", help="Weekly metrics and separated trend series")
+    report_sub = report.add_subparsers(dest="report_command", required=True)
+    report_weekly = report_sub.add_parser("weekly")
+    report_weekly.add_argument("--student", required=True)
+    report_weekly.add_argument("--week-start")
+    report_weekly.add_argument("--as-of")
+    report_weekly.add_argument("--output")
+    report_weekly.set_defaults(func=cmd_weekly_report)
+    report_trends = report_sub.add_parser("trends")
+    report_trends.add_argument("--student", required=True)
+    report_trends.add_argument("--start", required=True)
+    report_trends.add_argument("--end", required=True)
+    report_trends.add_argument("--output")
+    report_trends.set_defaults(func=cmd_trend_report)
+
     migrate = sub.add_parser("migrate", help="Read-only legacy migrations")
     migrate_sub = migrate.add_subparsers(dest="migrate_command", required=True)
     migrate_legacy_parser = migrate_sub.add_parser("legacy")
@@ -321,6 +468,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.func(args))
-    except (ConfigurationError, IngestConflict, ValueError, KeyError, sqlite3.Error) as exc:  # type: ignore[name-defined]
+    except (ConfigurationError, IngestConflict, ValueError, KeyError, RuntimeError, sqlite3.Error) as exc:  # type: ignore[name-defined]
         print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
         return 1
