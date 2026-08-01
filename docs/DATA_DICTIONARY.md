@@ -5,6 +5,8 @@
 | Table | Grain | Important fields |
 | --- | --- | --- |
 | `students` | One anonymous learner | `student_id`, private `display_name`, timezone, target retention |
+| `subjects` | One registered subject adapter | stable `subject_code`, bilingual names, `ready/generic` adapter status |
+| `student_subjects` | One learner-to-subject enrollment | active flag and first enrollment time; evidence import activates the relation automatically |
 | `learning_sessions` | One class, dictation, homework, practice, or test activity | source thread, type, start/end, planned/completed counts, status |
 | `artifacts` | One material used by a session | type, title, private path/URI, SHA-256, verification status |
 | `session_observations` | One narrative observation | evidence level prevents a general observation from becoming an item error |
@@ -15,7 +17,7 @@
 
 | Table | Grain | Important fields |
 | --- | --- | --- |
-| `content_items` | One actually used question, word, phrase, sentence, or writing task | domain, item type, prompt/answer snapshot, response mode, difficulty, validation status |
+| `content_items` | One actually used question, word, phrase, sentence, or writing task | `subject_code`, domain, item type, prompt/answer snapshot, response mode, difficulty, validation status |
 | `external_references` | One stable source ID linked to one item | namespace, reference type, external ID, optional passage/source parent, source metadata |
 | `knowledge_points` | One hierarchical skill/knowledge node | stable `code`, parent, English/Chinese name, domain |
 | `item_knowledge_map` | One used-item-to-knowledge relation | primary/secondary/prerequisite/trap role, mapping source, confidence, verification status, rationale, source snapshot |

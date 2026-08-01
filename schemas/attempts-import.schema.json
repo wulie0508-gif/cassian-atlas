@@ -100,6 +100,7 @@
       "required": ["domain", "item_type"],
       "properties": {
         "item_id": {"type": "string"},
+        "subject_code": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"},
         "domain": {"enum": ["vocabulary", "grammar", "reading", "translation", "writing", "sentence", "knowledge"]},
         "item_type": {"type": "string"},
         "prompt_snapshot": {"type": ["string", "null"]},

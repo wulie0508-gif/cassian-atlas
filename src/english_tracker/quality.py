@@ -276,10 +276,43 @@ def run_quality_checks(conn) -> dict[str, Any]:
         "Review state does not point to a voided attempt",
         "Rebuild review state from active attempt history.",
     )
+    add(
+        "active_student_has_subject",
+        "medium",
+        _count(
+            conn,
+            """
+            SELECT COUNT(*) FROM students s
+            WHERE s.active=1 AND NOT EXISTS (
+              SELECT 1 FROM student_subjects ss
+              JOIN subjects sub ON sub.subject_code=ss.subject_code AND sub.active=1
+              WHERE ss.student_id=s.student_id AND ss.active=1
+            )
+            """,
+        ),
+        "Every active student has at least one active subject workspace",
+        "Assign the student to an active subject before importing learning records.",
+    )
+    add(
+        "content_subject_registry",
+        "high",
+        _count(
+            conn,
+            """
+            SELECT COUNT(*) FROM content_items ci
+            LEFT JOIN subjects sub ON sub.subject_code=ci.subject_code AND sub.active=1
+            WHERE ci.record_status='active' AND sub.subject_code IS NULL
+            """,
+        ),
+        "Every active content item belongs to a registered subject",
+        "Register the subject or correct the item through an audited replacement import.",
+    )
     counts = {
         table: _count(conn, f'SELECT COUNT(*) FROM "{table}"')
         for table in (
             "students",
+            "subjects",
+            "student_subjects",
             "learning_sessions",
             "content_items",
             "attempts",

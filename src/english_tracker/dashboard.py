@@ -297,6 +297,7 @@ def low_friction_summary(conn, student_id: str) -> dict[str, Any]:
 
     return {
         "generated_at": utc_now(),
+        "student_id": student_id,
         "mode": "low_friction_v1",
         "headline": "后台已接通，平时不用维护网站",
         "current": {
@@ -370,6 +371,9 @@ def context_for(conn, audience: str, *, student_id: str, question_bank: str | Pa
             "home_summary": "/api/home",
         }
         result["web_endpoints"] = {
+            "app_config": "/api/app-config",
+            "students": "/api/students",
+            "subject_overview": "/api/subject-overview?subject_code={subject_code}",
             "question_search": "/api/questions",
             "knowledge_search": "/api/knowledge/search",
             "material_search": "/api/library/search",
@@ -388,6 +392,10 @@ def context_for(conn, audience: str, *, student_id: str, question_bank: str | Pa
             "trend_report": "/api/reports/trends",
         }
         result["agent_trigger_rules"] = [
+            {
+                "when": "写入任何新题目或学习活动时",
+                "action": "显式使用当前 student_id；非英语内容还要设置 item.subject_code，防止跨学生或跨学科串库。",
+            },
             {
                 "when": "用户提供课堂、阅读、听写或测试结果时",
                 "action": "Agent 直接调用对应接口完成查询、批改或写入；不要把常规录入工作推回给用户操作网站。",

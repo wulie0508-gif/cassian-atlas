@@ -3,6 +3,10 @@ const pageTitle = document.querySelector('#page-title');
 const eyebrow = document.querySelector('#section-eyebrow');
 const freshness = document.querySelector('#freshness');
 const detailButton = document.querySelector('#detail-mode-button');
+const studentSelect = document.querySelector('#student-select');
+const subjectSelect = document.querySelector('#subject-select');
+const localeSelect = document.querySelector('#locale-select');
+const studentDialog = document.querySelector('#student-dialog');
 const toast = document.querySelector('#toast');
 const dialog = document.querySelector('#question-dialog');
 const state = {
@@ -10,6 +14,11 @@ const state = {
   cache: {},
   dictation: [],
   detailMode: window.localStorage.getItem('hunan-hub-detail-mode') === 'true',
+  locale: window.localStorage.getItem('open-tutor-locale') || 'zh-CN',
+  studentId: window.localStorage.getItem('open-tutor-student') || '',
+  subjectCode: window.localStorage.getItem('open-tutor-subject') || 'english',
+  students: [],
+  config: null,
 };
 
 const titles = {
@@ -19,7 +28,7 @@ const titles = {
   assessments: ['学习记录', 'LEARNING RECORDS'],
   library: ['解析中心', 'PARSING PIPELINE'],
   dictation: ['单词听写', 'DICTATION AUTOMATION'],
-  workflow: ['三个对话', 'WORKFLOW CONTRACTS'],
+  workflow: ['Agent 工作流', 'WORKFLOW CONTRACTS'],
 };
 
 function esc(value) {
@@ -34,7 +43,18 @@ function notify(message, isError = false) {
   window.setTimeout(() => toast.className = 'toast', 2600);
 }
 async function api(path, options = {}) {
-  const response = await fetch(path, {headers: {'Content-Type': 'application/json'}, ...options});
+  const method = String(options.method || 'GET').toUpperCase();
+  const url = new URL(path, window.location.origin);
+  const publicEndpoints = new Set(['/api/health', '/api/app-config', '/api/students']);
+  if (state.studentId && !publicEndpoints.has(url.pathname)) url.searchParams.set('student_id', state.studentId);
+  const response = await fetch(`${url.pathname}${url.search}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(state.studentId && method !== 'GET' ? {'X-Student-ID': state.studentId} : {}),
+      ...(options.headers || {}),
+    },
+  });
   const data = await response.json().catch(() => ({error: `HTTP ${response.status}`}));
   if (!response.ok) throw new Error(data.error || `请求失败：${response.status}`);
   return data;
@@ -67,6 +87,62 @@ function applyDetailMode() {
   detailButton.textContent = state.detailMode ? '返回减负模式' : '查看专业数据';
 }
 
+function applyLocale() {
+  window.OpenTutorI18n?.apply(document, state.locale);
+}
+
+function subjectLabel(subject) {
+  return state.locale === 'en' ? subject.name_en : subject.name_cn;
+}
+
+function knowledgeLabel(row) {
+  const raw = state.locale === 'en' ? (row.name_en || row.knowledge_point) : (row.name_cn || row.knowledge_point);
+  if (state.locale !== 'en') return raw;
+  return String(raw || '').replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function populateWorkspaceControls() {
+  studentSelect.innerHTML = state.students.map(student => `<option value="${esc(student.student_id)}">${esc(student.display_name || student.student_id)}</option>`).join('');
+  studentSelect.value = state.studentId;
+  const subjects = state.config?.subjects || [];
+  subjectSelect.innerHTML = subjects.map(subject => `<option value="${esc(subject.subject_code)}">${esc(subjectLabel(subject))}</option>`).join('');
+  subjectSelect.value = state.subjectCode;
+  localeSelect.value = state.locale;
+  const createSubject = document.querySelector('#student-subject');
+  createSubject.innerHTML = subjects.map(subject => `<option value="${esc(subject.subject_code)}">${esc(subjectLabel(subject))}</option>`).join('');
+  createSubject.value = state.subjectCode;
+  applyLocale();
+}
+
+async function refreshStudents(preferredId = '') {
+  const data = await api('/api/students');
+  state.students = data.items || [];
+  const available = new Set(state.students.map(item => item.student_id));
+  state.studentId = available.has(preferredId) ? preferredId : (available.has(state.studentId) ? state.studentId : (state.students[0]?.student_id || ''));
+  window.localStorage.setItem('open-tutor-student', state.studentId);
+  populateWorkspaceControls();
+}
+
+async function renderSubjectWorkspace() {
+  const data = await api(`/api/subject-overview?subject_code=${encodeURIComponent(state.subjectCode)}`);
+  const subject = data.subject;
+  const summary = data.summary;
+  const name = subjectLabel(subject);
+  pageTitle.textContent = name;
+  eyebrow.textContent = 'SUBJECT WORKSPACE';
+  view.innerHTML = `
+    <section class="relief-hero compact-hero">
+      <div class="relief-copy"><p class="eyebrow">${esc(subject.subject_code.toUpperCase())} · GENERIC ADAPTER</p><h2>学科工作区已就绪</h2><p>这个学科已经可以接收通用课堂、作业与测试记录；专用题库和知识树由独立适配器逐步接入。</p></div>
+      <div class="next-action"><span>${data.capabilities.specialized_adapter ? '已接入' : '待扩展'}</span><strong>${esc(name)} · ${data.capabilities.specialized_adapter ? '专用适配器' : '通用接口可用'}</strong><p>Agent 写入时为题目设置 subject_code=${esc(subject.subject_code)}，数据会与其他学科严格分开。</p></div>
+    </section>
+    <section class="quick-facts" aria-label="学科摘要">
+      ${metric('学习活动', num(summary.session_count), '按学生与学科隔离')}
+      ${metric('题目证据', num(summary.attempt_count), `${num(summary.item_count)} 个不同项目`)}
+      ${metric('当前正确率', pct(summary.accuracy, 1), `${num(summary.scored_count)} 次有效评分`)}
+    </section>
+    ${summary.attempt_count ? panel('最后活动', '当前学科最近一次有证据的时间', `<p><strong>${esc(summary.last_activity_at || '—')}</strong></p>`) : panel('当前没有学习记录', '这是正常的空工作区', '<div class="empty-state"><p>把第一次课堂或测试结果交给 Agent 后，这里会自动出现证据。</p></div>')}`;
+}
+
 async function renderOverview(force = false) {
   const home = !force && state.cache.home ? state.cache.home : await api('/api/home');
   state.cache.home = home;
@@ -96,7 +172,7 @@ async function renderOverview(force = false) {
   const lib = data.library.totals;
   const work = data.workflow.work_items;
   const weakest = (mastery.knowledge_points || []).slice(0, 8).map(row => ({
-    label: row.name_cn || row.knowledge_point,
+    label: knowledgeLabel(row),
     value: 1 - Number(row.calibrated_mastery || 0),
   }));
   const questionTypes = data.question_bank.distributions.question_types.slice(0, 8);
@@ -153,7 +229,7 @@ async function renderQuestionBank() {
       <div class="panel-head"><div><h2>完整语篇自动组卷</h2><p>按近期错题加权的 set-cover 选择尽量少的完整语篇；不会拆散文章</p></div></div>
       <div class="panel-body">
         <form id="passage-selector">
-          <div class="check-grid">${suggestedTargets.map((row, index) => `<label class="check-card"><input type="checkbox" name="target_code" value="${esc(row.knowledge_point)}" ${index < 3 ? 'checked' : ''}><span><strong>${esc(row.name_cn)}</strong><small class="mono">${esc(row.knowledge_point)}</small></span></label>`).join('') || '<p class="subtle">尚无学生知识点证据，可在下方手工输入代码。</p>'}</div>
+          <div class="check-grid">${suggestedTargets.map((row, index) => `<label class="check-card"><input type="checkbox" name="target_code" value="${esc(row.knowledge_point)}" ${index < 3 ? 'checked' : ''}><span><strong>${esc(knowledgeLabel(row))}</strong><small class="mono">${esc(row.knowledge_point)}</small></span></label>`).join('') || '<p class="subtle">尚无学生知识点证据，可在下方手工输入代码。</p>'}</div>
           <div class="toolbar" style="margin-top:14px"><div class="field grow"><label for="manual-targets">补充知识点代码（逗号分隔）</label><input id="manual-targets" name="manual_targets" placeholder="例如：tense, passive_voice"></div><div class="field"><label for="max-passages">最多语篇</label><input id="max-passages" name="max_passages" type="number" min="1" max="12" value="5"></div><button class="button" type="submit">生成选篇</button></div>
         </form>
         <div id="passage-selection-results"><p class="subtle">默认勾选当前证据最弱的三个知识点；机器建议标签不会被自动升级为已核验。</p></div>
@@ -411,14 +487,19 @@ async function render(force = false) {
   const [title, label] = titles[state.current]; pageTitle.textContent = title; eyebrow.textContent = label;
   document.querySelectorAll('.nav-item').forEach(button => button.classList.toggle('is-active', button.dataset.view === state.current));
   try {
-    if (state.current === 'overview') await renderOverview(force);
-    if (state.current === 'question-bank') await renderQuestionBank();
-    if (state.current === 'mastery') await renderMastery();
-    if (state.current === 'assessments') await renderAssessments();
-    if (state.current === 'library') await renderLibrary();
-    if (state.current === 'dictation') await renderDictation();
-    if (state.current === 'workflow') await renderWorkflow();
+    if (state.subjectCode !== 'english') {
+      await renderSubjectWorkspace();
+    } else {
+      if (state.current === 'overview') await renderOverview(force);
+      if (state.current === 'question-bank') await renderQuestionBank();
+      if (state.current === 'mastery') await renderMastery();
+      if (state.current === 'assessments') await renderAssessments();
+      if (state.current === 'library') await renderLibrary();
+      if (state.current === 'dictation') await renderDictation();
+      if (state.current === 'workflow') await renderWorkflow();
+    }
     freshness.textContent = `数据刷新于 ${new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'})}`;
+    applyLocale();
   } catch (error) { errorState(error); }
 }
 
@@ -437,8 +518,31 @@ detailButton.addEventListener('click', async () => {
   state.detailMode = !state.detailMode;
   window.localStorage.setItem('hunan-hub-detail-mode', String(state.detailMode));
   applyDetailMode();
-  if (state.current === 'overview') await renderOverview();
+  if (state.current === 'overview') await render();
   notify(state.detailMode ? '已展开专业数据' : '已返回减负模式');
+});
+studentSelect.addEventListener('change', async () => {
+  state.studentId = studentSelect.value;
+  window.localStorage.setItem('open-tutor-student', state.studentId);
+  state.cache = {};
+  await render(true);
+});
+subjectSelect.addEventListener('change', async () => {
+  state.subjectCode = subjectSelect.value;
+  window.localStorage.setItem('open-tutor-subject', state.subjectCode);
+  state.cache = {};
+  await render(true);
+});
+localeSelect.addEventListener('change', async () => {
+  state.locale = localeSelect.value;
+  window.localStorage.setItem('open-tutor-locale', state.locale);
+  populateWorkspaceControls();
+  await render();
+});
+document.querySelector('#add-student-button').addEventListener('click', () => {
+  document.querySelector('#student-subject').value = state.subjectCode;
+  studentDialog.showModal();
+  document.querySelector('#student-name').focus();
 });
 document.addEventListener('submit', async event => {
   if (event.target.id === 'question-search') { event.preventDefault(); await searchQuestionRows(); }
@@ -468,12 +572,34 @@ document.addEventListener('submit', async event => {
       notify(`已保存：${result.correct}/${result.total}`); state.cache = {}; await renderDictation();
     } catch (error) { notify(error.message, true); }
   }
+  if (event.target.id === 'student-form') {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    const body = {display_name:form.get('display_name'),timezone:form.get('timezone'),subject_codes:[form.get('subject_code')]};
+    try {
+      const result = await api('/api/students', {method:'POST', body:JSON.stringify(body)});
+      await refreshStudents(result.student.student_id);
+      state.subjectCode = String(form.get('subject_code'));
+      window.localStorage.setItem('open-tutor-subject', state.subjectCode);
+      studentDialog.close();
+      event.target.reset();
+      document.querySelector('#student-timezone').value = 'Asia/Shanghai';
+      state.cache = {};
+      notify('添加学生成功');
+      await render(true);
+    } catch (error) { notify(error.message, true); }
+  }
 });
 
 async function boot() {
   applyDetailMode();
+  localeSelect.value = state.locale;
   try {
-    const health = await api('/api/health');
+    const [health, config] = await Promise.all([api('/api/health'), api('/api/app-config')]);
+    state.config = config;
+    const supportedSubjects = new Set(config.subjects.map(item => item.subject_code));
+    if (!supportedSubjects.has(state.subjectCode)) state.subjectCode = 'english';
+    await refreshStudents();
     document.querySelector('#health-label').textContent = health.status === 'ok' ? '数据已连接' : '需要关注';
     document.querySelector('#health-dot').className = `health-dot ${health.status === 'ok' ? 'ok' : 'error'}`;
   } catch {

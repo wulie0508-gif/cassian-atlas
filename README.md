@@ -1,161 +1,187 @@
-# English Learning Tracker
+<div align="center">
+  <img src="docs/assets/logo.svg" width="420" alt="OpenTutor Ledger">
+  <p><strong>A local-first learning evidence layer for humans and agents.</strong></p>
+  <p>
+    <a href="README.zh-CN.md">中文</a> ·
+    <a href="#quick-start">Quick start</a> ·
+    <a href="docs/PRIVACY_BOUNDARY.md">Privacy boundary</a> ·
+    <a href="CONTRIBUTING.md">Contributing</a>
+  </p>
+  <p>
+    <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11%2B-244b3d?style=flat-square">
+    <img alt="SQLite" src="https://img.shields.io/badge/store-SQLite-35606d?style=flat-square">
+    <img alt="local first" src="https://img.shields.io/badge/privacy-local--first-b96a34?style=flat-square">
+    <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-17221e?style=flat-square">
+  </p>
+</div>
 
-A privacy-first, local-first learning record system for vocabulary, grammar, reading, translation, writing, homework, tests, and classroom review. It stores immutable attempt evidence in SQLite, links to external content by ID, builds due-review queues, and reports weaknesses with explicit sample size and confidence.
+---
 
-## What is open and what stays private
+## Learning tools remember answers. OpenTutor Ledger remembers evidence.
 
-This repository contains only code, migrations, schemas, tests, and anonymous examples. It must not contain student names, student answers, scores, original test papers, databases, backups, or machine-specific paths.
+OpenTutor Ledger is a private learning record and orchestration layer. It gives teachers, learners, and AI agents one durable answer to five recurring questions:
 
-The private data directory contains the real SQLite database, import inboxes, backups, exports, and logs. External question banks and calibrated vocabulary databases stay read-only and are referenced by stable IDs. Question-bank content is not copied wholesale. The grammar catalog stores IDs, source metadata, raw/normalized tags, and mappings—but no stem or answer text; actually used items may receive a minimal historical snapshot.
+1. What did this learner actually do?
+2. What was tested, and what evidence supports the diagnosis?
+3. Which review is due next?
+4. How much should this result influence the trend?
+5. Can another agent reuse the answer without recomputing everything?
 
-## Requirements
+It stores immutable attempts, revisioned evaluations, sample-aware mastery, review queues, and auditable agent suggestions in a normalized SQLite database. The local web app stays intentionally calm: current state, the smallest next action, and automation health first; exact weights and evidence remain one click away.
 
-- Python 3.11 or newer
-- SQLite with WAL support (bundled with normal Python builds)
-- Core tracker and website: no third-party runtime packages
-- Optional source parsing: `pypdf`, `pywin32`, Microsoft Word, Poppler and Windows Media OCR as appropriate to the source format
+> **The product boundary:** precise in the back, light in the front. Agents do the clerical work. Humans make the decisions that require judgment.
 
-## Install
+## What ships
 
-```powershell
+| Layer | What it does |
+| --- | --- |
+| Evidence ledger | Immutable item attempts, captured-answer semantics, revisioned grading, and audit history |
+| Multi-learner workspaces | Switch learners without mixing sessions, attempts, mastery, or review queues |
+| Multi-subject registry | English ships with a specialized adapter; geography, mathematics, Chinese, and science accept generic evidence today |
+| Agent contracts | Stable JSON/HTTP boundaries for courseware, dictation, engineering, reports, and review planning |
+| Evidence-weighted mastery | Controlled offline tests calibrate daily practice without erasing it |
+| Knowledge graphs | Hierarchical bilingual concepts and many-to-many item mappings with source, confidence, role, and verification state |
+| Deterministic review | Local grading and due queues reduce repeated model calls |
+| Bilingual product UI | Switch between 简体中文 and English without changing stored facts |
+| Local management app | A responsive, accessible dashboard with a low-friction default and an evidence view |
+
+## The evidence boundary
+
+OpenTutor Ledger deliberately stores different claims in different places:
+
+```mermaid
+flowchart LR
+    Q["Item knowledge\nWhat is tested?"] --> A["Attempt\nWhat did the learner answer?"]
+    A --> E["Evaluation\nHow was it scored?"]
+    A --> C["Error evidence\nWhy might it be wrong?"]
+    C --> V{"Verified by a human?"}
+    V -->|No| S["suggested"]
+    V -->|Yes| T["verified"]
+```
+
+- `answer_capture_status=not_captured` never becomes a guessed answer or a fabricated error cause.
+- One failed item remains a tentative weak signal until sample size increases.
+- Model-created knowledge mappings and diagnoses stay `suggested`.
+- Question knowledge describes what an item tests; attempt error evidence describes what happened to one learner.
+- Unlike exam totals are never connected as one raw-score trend.
+
+## Agent-native by design
+
+The website is not a second data-entry job. An agent starts with the compact context endpoint, performs the work, and writes through an idempotent contract.
+
+```text
+GET  /api/home
+GET  /api/context/courseware
+GET  /api/context/dictation
+POST /api/classroom/attempts
+POST /api/dictation/results
+GET  /api/reports/weekly
+GET  /api/reports/trends
+```
+
+Every write creates a checked backup, runs inside a transaction, and can be replayed safely with the same idempotency key. Agents never need ad hoc SQL access.
+
+## Quick start
+
+### 1. Install
+
+```bash
+git clone https://github.com/wulie0508-gif/open-tutor-ledger.git
+cd open-tutor-ledger
+python -m venv .venv
 python -m pip install -e .
-$env:ENGLISH_TRACKER_DATA_DIR = 'C:\path\to\private-learning-data'
-$env:ENGLISH_TRACKER_DB_NAME = 'learning.sqlite'
-python -m english_tracker init --student STU-001 --display-name 'Private Local Name'
 ```
 
-The display name is written only to the private database. Public examples always use `STU-001`.
+### 2. Create a private runtime outside the repository
 
-## Core commands
-
-```powershell
-python -m english_tracker session import --input session.json
-python -m english_tracker attempts import --input attempts.json
-python -m english_tracker progress import --input progress.json
-
-python -m english_tracker weaknesses report --student STU-001 --days 30
-python -m english_tracker review due --student STU-001
-python -m english_tracker context export --student STU-001 --for courseware
-python -m english_tracker context export --student STU-001 --for dictation
-
-python -m english_tracker knowledge sync --question-bank QUESTION_BANK.sqlite
-python -m english_tracker knowledge question --question Q-EXAMPLE-001
-python -m english_tracker knowledge passage --passage PAS-EXAMPLE-001
-python -m english_tracker knowledge matrix --passages PAS-EXAMPLE-001 PAS-EXAMPLE-002 --csv matrix.csv
-python -m english_tracker select passages --knowledge tense noun_clause --student STU-001
-
-python -m english_tracker report weekly --student STU-001 --week-start 2026-01-12
-python -m english_tracker report trends --student STU-001 --start 2026-01-01 --end 2026-03-31
-
-python -m english_tracker data check
-python -m english_tracker backup --reason before-manual-change
-python -m english_tracker ingest undo --event EVT-TO-REVERT --reason 'operator correction'
-python -m english_tracker ingest correct --event EVT-TO-REVERT --kind attempts --input corrected-attempts.json
-```
-
-Every bulk import automatically creates an integrity-checked SQLite online backup. All writes use transactions. Repeating the same `event_id` or `idempotency_key` with the same payload is a no-op; reusing either identifier with a different payload fails loudly.
-
-## Local management hub
+PowerShell:
 
 ```powershell
-$env:ENGLISH_TRACKER_QUESTION_BANK = 'C:\path\to\read-only-question-bank.sqlite'
-$env:ENGLISH_TRACKER_LIBRARY_ROOT = 'C:\path\to\source-library'
+$env:ENGLISH_TRACKER_DATA_DIR = "$env:USERPROFILE\OpenTutorData"
+$env:ENGLISH_TRACKER_DB_NAME = "learning.sqlite"
+python -m english_tracker init --student STU-001 --display-name "Local learner"
+python scripts/create_empty_question_bank.py --output "$env:USERPROFILE\OpenTutorData\question-bank.sqlite"
+New-Item -ItemType Directory -Force "$env:USERPROFILE\OpenTutorData\source-library" | Out-Null
+$env:ENGLISH_TRACKER_QUESTION_BANK = "$env:USERPROFILE\OpenTutorData\question-bank.sqlite"
+$env:ENGLISH_TRACKER_LIBRARY_ROOT = "$env:USERPROFILE\OpenTutorData\source-library"
 python -m english_tracker serve --host 127.0.0.1 --port 8788 --open-browser
 ```
 
-The local-only site visualizes project work, the verified question bank, real classroom performance, evidence-weighted mastery, offline calibration, passage-level reading diagnosis, the source parsing ledger, deterministic dictation, and the three conversation contracts. Its API is the preferred handoff mechanism:
+The empty question-bank shell contains schema only—no exercises. Bring your own licensed or original content through an adapter and keep it outside the repository.
 
-- `/api/home` returns the low-friction status surface: current evidence, automation health, and the smallest next action
-- `/api/context/engineering`, `/api/context/courseware`, `/api/context/dictation`
-- `/api/grammar/questions/{question_id}` and `/api/grammar/passages/{passage_id}/coverage`
-- `/api/grammar/coverage-matrix?passage_id=...` and `POST /api/grammar/select-passages`
-- `POST /api/classroom/attempts`, `POST /api/dictation/results`
-- `/api/performance/sessions`, `/api/reading/passages/{passage_id}/performance`
-- `/api/reading/error-types`, `POST /api/reading/diagnostics`
-- `/api/reports/weekly` and `/api/reports/trends`
-
-The website starts in **low-friction mode**. It answers three questions first: what is happening now, what the user needs to do next, and whether the Agent workflows are healthy. Exact tables, weights, audit evidence, and emergency manual forms remain available behind **查看专业数据**. Routine classroom, reading, test, and dictation records should be written by the responsible Agent; the site is not a second clerical workflow.
-
-## Full source-library pipeline
-
-The pipeline never deletes or edits originals. It inventories all files, hashes exact duplicates, extracts supported text, converts legacy Word files into a private cache, reuses source-backed textbook OCR, groups prompt/answer/audio versions, and stages passages, questions, answers, RAG chunks, knowledge suggestions, and review tasks.
+### 3. Record an anonymous learning event
 
 ```powershell
-python -m english_tracker library scan --root C:\path\to\source-library
-python -m english_tracker library hash
-python -m english_tracker library extract --limit 0
-python -m english_tracker library convert-doc --limit 100
-python -m english_tracker library pair
-python -m english_tracker library structure
-python -m english_tracker library propagate-duplicates
-python -m english_tracker library summary --output library-summary.json
-python -m english_tracker library structure-summary --output structure-summary.json
+python -m english_tracker session import --input examples/session.example.json
+python -m english_tracker attempts import --input examples/attempts.example.json
+python -m english_tracker weaknesses report --student STU-001 --days 30
 ```
 
-`structured` means text has been split into auditable objects. Audio marked `indexed` has been paired with its paper/script where possible; it does not claim a word-for-word transcript. Machine-created candidates stay in staging with `suggested`/`needs_check` status and cannot enter the verified question bank without review.
+## Multi-learner and multi-subject model
 
-## Data contracts
+Each learner owns sessions, attempts, review state, and reports. Content items belong to a registered subject through `subject_code`. The web app can create and switch learner workspaces without restarting the service.
 
-- `schemas/session-import.schema.json`
-- `schemas/attempts-import.schema.json`
-- `schemas/progress-import.schema.json`
-- `schemas/reading-diagnostics.schema.json`
-- Anonymous examples in `examples/`
+Specialized adapters may add a subject-specific question bank, knowledge tree, selector, or grader. The generic ledger works without one:
 
-The runtime performs high-value contract checks without adding a third-party dependency. Producers should also validate against the published JSON Schemas in their own pipeline.
-
-## Weakness interpretation
-
-The score combines error rate, sample size, recency, consecutive errors, latest review outcome, item difficulty, and response mode. It is not a total-score ranking.
-
-- Fewer than two attempts or fewer than two distinct items: `tentative` or `insufficient_evidence`.
-- Errors remain linked to attempt IDs and evidence items.
-- Session observations never become fabricated item errors.
-- `answer_capture_status = not_captured` is distinct from a captured blank answer.
-- No specific error cause may be attached to `not_captured`; the known evaluation result remains valid evidence, while error-cause inference is rejected.
-- Rule/model knowledge mappings remain suggestions until a human verifies them; model suggestions cannot be auto-promoted by database constraint.
-
-## Grammar coverage and measurement
-
-The source-checked grammar catalog is versioned by source SHA-256. A hierarchical knowledge tree supports primary, secondary, prerequisite, and trap mappings. Passage selection uses weighted greedy set-cover over complete source-checked passages and incorporates recent wrong/partial evidence without splitting passages.
-
-Weekly reports include topic accuracy, measured duration, blank rate, not-captured count, retest recovery, and knowledge-point accuracy with sample size. Trend exports partition raw scores by assessment kind, reporting series, and maximum score, so unlike totals are never connected. Schedule checks cover biweekly closed mixed tests, four-week full papers, and the December-onward weekly full-paper target.
-
-Every active item attempt with a current evaluation is real performance evidence, including ordinary classroom practice, reading, grammar cloze, dictation and homework. Offline closed mixed tests and full papers receive higher evidence weights because they calibrate transfer under controlled conditions; they are not the only records counted as scores.
-
-Reading reports aggregate a complete passage without breaking it into isolated questions. They keep source-backed test points separate from attempt-specific error causes, expose missing diagnoses, block cause inference for `not_captured`, and return verified same-test-point practice. Model-created diagnoses remain `suggested` until a teacher explicitly confirms them.
-
-The first scheduler is deliberately conservative (`simple-v1`). Historical FSRS state is preserved during migration, but this project does not claim FSRS compatibility until a versioned adapter is implemented and validated.
-
-## Legacy migration
-
-```powershell
-python -m english_tracker migrate legacy `
-  --student STU-001 `
-  --legacy-db 'C:\read-only\legacy-review.sqlite' `
-  --mastery-json 'C:\read-only\items.json' `
-  --victor-db 'C:\read-only\calibrated-vocab.sqlite'
+```json
+{
+  "item": {
+    "subject_code": "geography",
+    "domain": "knowledge",
+    "item_type": "multiple_choice",
+    "prompt_snapshot": "Anonymous local prompt",
+    "answer_snapshot": "A"
+  }
+}
 ```
 
-The migration:
+## English adapter
 
-- hashes source files before and after;
-- opens SQLite sources in read-only/query-only mode;
-- preserves legacy rows in `legacy_records`;
-- normalizes error labels while keeping `raw_error_type`;
-- links JSON mastery cards to existing legacy items deterministically;
-- retains scheduler-only history without inventing attempt facts;
-- is idempotent by source hash and student ID.
+The bundled English adapter adds:
 
-## Testing
+- grammar knowledge trees and complete-passage coverage matrices;
+- weighted greedy set-cover over complete source-checked passages;
+- reading test-point and learner error-cause separation;
+- deterministic vocabulary dictation and review queues;
+- source-library staging, OCR provenance, and teaching-method retrieval;
+- weekly reports and separated assessment trends.
 
-```powershell
+No question bank, exam paper, passage, textbook, answer key, audio, or learner record is distributed with this project.
+
+## Architecture
+
+```mermaid
+flowchart TB
+    UI["Bilingual local app"] --> API["Local HTTP contracts"]
+    AG["Courseware · Dictation · Engineering agents"] --> API
+    API --> ING["Idempotent ingestion boundary"]
+    ING --> DB[("Private SQLite evidence ledger")]
+    DB --> REP["Mastery · Reviews · Reports"]
+    EXT[("Private external content")] -->|"read-only adapters"| API
+    PUB["Public repository"] -. "contains code only" .-> API
+```
+
+Read [ARCHITECTURE.md](ARCHITECTURE.md) and the [data dictionary](docs/DATA_DICTIONARY.md) for the complete model.
+
+## Privacy release gate
+
+Before publishing:
+
+```bash
 python -m unittest discover -s tests -v
-python -m english_tracker data check
+python scripts/release_privacy_audit.py
 ```
 
-See [ARCHITECTURE.md](ARCHITECTURE.md), [data dictionary](docs/DATA_DICTIONARY.md), and [cross-thread handoff](HANDOFF_FOR_THREADS.md).
+The release gate rejects tracked databases, documents, spreadsheets, images, audio, archives, oversized files, private path markers, and known learner identifiers. See [the full boundary](docs/PRIVACY_BOUNDARY.md).
+
+## Project status
+
+The evidence store, multi-learner isolation, subject registry, Chinese/English UI, local app, agent contracts, English analytics, privacy tests, and backup workflow are implemented. The project is pre-1.0: internet-facing authentication, packaged subject adapters, and an FSRS-compatible scheduler remain future work.
+
+## Contributing
+
+Contributions are welcome—especially generic subject adapters, accessibility improvements, privacy tooling, and evidence-calibration research. Read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 
 ## License
 
-MIT. The repository has no third-party runtime dependency. Student data and external question/vocabulary content are outside the license scope because they are not distributed with the repository.
+Code and original documentation are licensed under the [MIT License](LICENSE). Learner data and third-party educational content are outside the repository and outside this license.

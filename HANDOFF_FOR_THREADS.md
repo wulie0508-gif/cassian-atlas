@@ -9,6 +9,19 @@ $env:ENGLISH_TRACKER_DB_NAME = 'learning.sqlite'
 
 Do not open the SQLite database for ad hoc writes. Do not edit migrations already applied. New producers must send JSON through the CLI.
 
+## Select the learner and subject explicitly
+
+The local app supports multiple learners in one normalized database. Every learner-specific read accepts `student_id` as a query parameter, and every write accepts the same field or the `X-Student-ID` header. Never reuse one learner's cached context for another learner.
+
+English uses the specialized question-bank, grammar, reading, and dictation adapter. `geography`, `mathematics`, `chinese`, and `science` use the generic evidence adapter until a subject-specific adapter is installed. New item payloads set `item.subject_code`; importing evidence automatically activates that learner-subject relation.
+
+```powershell
+Invoke-RestMethod 'http://127.0.0.1:8788/api/students'
+Invoke-RestMethod 'http://127.0.0.1:8788/api/subject-overview?student_id=STU-001&subject_code=geography'
+```
+
+The website language switch (`zh-CN` / `en`) changes presentation only. Stored facts, codes, and audit history are unchanged.
+
 ## Preferred live handoff: local HTTP API
 
 When the management hub is running, read the audience-specific context first. This replaces repeatedly rewriting a handoff document:
@@ -25,6 +38,9 @@ The responses contain current weaknesses, due reviews, project status, question-
 
 | Need | Method and endpoint |
 | --- | --- |
+| Product languages and subject registry | `GET /api/app-config` |
+| Learner list / create a private learner | `GET /api/students`, `POST /api/students` |
+| One learner's subject summary | `GET /api/subject-overview?student_id=...&subject_code=...` |
 | Low-friction current state and next action | `GET /api/home` |
 | One verified question and deep detail | `GET /api/questions/{question_id}` |
 | One grammar question's normalized mappings | `GET /api/grammar/questions/{question_id}` |

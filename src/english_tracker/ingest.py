@@ -283,6 +283,7 @@ def _find_external_item(conn, refs: list[dict]) -> str | None:
 
 def _resolve_item(conn, attempt: dict, ingest_event_id: str, now: str) -> tuple[str, bool]:
     item_payload = dict(attempt.get("item") or {})
+    requested_subject_code = str(item_payload.get("subject_code") or "english").strip().lower()
     refs = list(item_payload.get("external_references") or attempt.get("external_references") or [])
     explicit_id = attempt.get("item_id") or item_payload.get("item_id")
     resolved_id = _find_external_item(conn, refs) if refs else None
@@ -296,18 +297,31 @@ def _resolve_item(conn, attempt: dict, ingest_event_id: str, now: str) -> tuple[
         else:
             item_id = stable_id(
                 "ITEM",
+                requested_subject_code,
                 item_payload.get("domain"),
                 item_payload.get("item_type"),
                 item_payload.get("prompt_snapshot"),
                 item_payload.get("answer_snapshot"),
             )
-    exists = conn.execute("SELECT 1 FROM content_items WHERE item_id = ?", (item_id,)).fetchone()
+    exists = conn.execute("SELECT subject_code FROM content_items WHERE item_id = ?", (item_id,)).fetchone()
     inserted = False
+    if exists and "subject_code" in item_payload and exists["subject_code"] != requested_subject_code:
+        raise IngestConflict(
+            f"Existing item {item_id} belongs to subject {exists['subject_code']}, not {requested_subject_code}"
+        )
     if not exists:
         if not item_payload.get("domain") or not item_payload.get("item_type"):
             raise IngestConflict(f"New item {item_id} requires item.domain and item.item_type")
+        subject_code = requested_subject_code
+        if not conn.execute(
+            "SELECT 1 FROM subjects WHERE subject_code=? AND active=1",
+            (subject_code,),
+        ).fetchone():
+            raise IngestConflict(f"Unknown or inactive item.subject_code: {subject_code}")
         content_hash = payload_hash(
             {
+                "subject": subject_code,
+                "domain": item_payload.get("domain"),
                 "prompt": item_payload.get("prompt_snapshot"),
                 "answer": item_payload.get("answer_snapshot"),
                 "type": item_payload.get("item_type"),
@@ -316,16 +330,17 @@ def _resolve_item(conn, attempt: dict, ingest_event_id: str, now: str) -> tuple[
         conn.execute(
             """
             INSERT INTO content_items(
-              item_id, domain, item_type, prompt_snapshot, answer_snapshot,
+              item_id, domain, item_type, subject_code, prompt_snapshot, answer_snapshot,
               direction, response_mode, difficulty_label, difficulty_weight,
               source_validation_status, legacy_ref, metadata_json, content_hash,
               created_by_event_id, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 item_id,
                 item_payload["domain"],
                 item_payload["item_type"],
+                subject_code,
                 item_payload.get("prompt_snapshot"),
                 item_payload.get("answer_snapshot"),
                 item_payload.get("direction"),
@@ -540,6 +555,19 @@ def import_attempts(conn, payload: dict, *, backup_path: str | None = None) -> d
         for index, attempt in enumerate(payload["attempts"], start=1):
             item_id, item_inserted = _resolve_item(conn, attempt, ingest_event_id, now)
             inserted_items += int(item_inserted)
+            item_subject = conn.execute(
+                "SELECT subject_code FROM content_items WHERE item_id=? AND record_status='active'",
+                (item_id,),
+            ).fetchone()
+            if item_subject:
+                conn.execute(
+                    """
+                    INSERT INTO student_subjects(student_id,subject_code,active,enrolled_at)
+                    VALUES (?,?,1,?)
+                    ON CONFLICT(student_id,subject_code) DO UPDATE SET active=1
+                    """,
+                    (payload["student_id"], item_subject["subject_code"], now),
+                )
             prior_count = conn.execute(
                 """SELECT COUNT(*) FROM attempts
                    WHERE student_id=? AND item_id=? AND record_status='active'""",

@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="胡楠英语学习项目本地管理与数据可视化">
-  <title>胡楠英语 · Learning Hub</title>
+  <meta name="description" content="OpenTutor Ledger — local-first learning evidence for humans and agents">
+  <title>OpenTutor Ledger</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body>
@@ -12,20 +13,24 @@
   <div class="app-shell">
     <aside class="sidebar" aria-label="主导航">
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true">H</span>
+        <svg class="brand-mark" aria-hidden="true" viewBox="0 0 64 64">
+          <path d="M10 17c8-3 15-1 22 5v27c-7-6-14-8-22-5V17Z"/>
+          <path d="M54 17c-8-3-15-1-22 5v27c7-6 14-8 22-5V17Z"/>
+          <circle cx="20" cy="28" r="2.5"/><circle cx="44" cy="28" r="2.5"/>
+        </svg>
         <div>
-          <strong>胡楠英语</strong>
-          <small>Learning Hub</small>
+          <strong>OpenTutor</strong>
+          <small>LEDGER</small>
         </div>
       </div>
       <nav class="nav-list">
-        <button class="nav-item is-active" data-view="overview"><span aria-hidden="true">◫</span>项目总览</button>
-        <button class="nav-item" data-view="question-bank"><span aria-hidden="true">⌕</span>题库与知识</button>
-        <button class="nav-item" data-view="mastery"><span aria-hidden="true">◒</span>学情掌握</button>
-        <button class="nav-item" data-view="assessments"><span aria-hidden="true">✓</span>学习记录</button>
-        <button class="nav-item" data-view="library"><span aria-hidden="true">↻</span>解析中心</button>
-        <button class="nav-item" data-view="dictation"><span aria-hidden="true">Aa</span>单词听写</button>
-        <button class="nav-item" data-view="workflow"><span aria-hidden="true">⇄</span>三个对话</button>
+        <button class="nav-item is-active" data-view="overview"><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 4h6v7H4zM14 4h6v4h-6zM14 12h6v8h-6zM4 15h6v5H4z"/></svg><span>项目总览</span></button>
+        <button class="nav-item" data-view="question-bank"><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M5 5.5c3.2-1.1 5.5-.5 7 1.4v12c-1.5-1.9-3.8-2.5-7-1.4v-12Zm14 0c-3.2-1.1-5.5-.5-7 1.4v12c1.5-1.9 3.8-2.5 7-1.4v-12Z"/></svg><span>题库与知识</span></button>
+        <button class="nav-item" data-view="mastery"><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3"/></svg><span>学情掌握</span></button>
+        <button class="nav-item" data-view="assessments"><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg><span>学习记录</span></button>
+        <button class="nav-item" data-view="library"><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h4"/></svg><span>解析中心</span></button>
+        <button class="nav-item" data-view="dictation"><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M7 18 12 5l5 13M9 14h6M18 6v7m-3-3h6"/></svg><span>单词听写</span></button>
+        <button class="nav-item" data-view="workflow"><svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h12m0 0-3-3m3 3-3 3M20 17H8m0 0 3-3m-3 3 3 3"/></svg><span>Agent 工作流</span></button>
       </nav>
       <div class="sidebar-foot">
         <div class="health-dot" id="health-dot" aria-hidden="true"></div>
@@ -41,6 +46,12 @@
         </div>
         <div class="topbar-actions">
           <span class="freshness" id="freshness">正在读取真实数据…</span>
+          <label class="compact-control"><span>学生</span><select id="student-select" aria-label="选择学生"></select></label>
+          <button class="icon-button add-student-button" id="add-student-button" type="button" aria-label="添加学生" title="添加学生">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+          <label class="compact-control"><span>学科</span><select id="subject-select" aria-label="选择学科"></select></label>
+          <label class="compact-control locale-control"><span>语言</span><select id="locale-select" aria-label="选择界面语言"><option value="zh-CN">中文</option><option value="en">English</option></select></label>
           <button class="button button-secondary mode-button" id="detail-mode-button" type="button" aria-pressed="false">查看专业数据</button>
           <button class="button button-secondary" id="refresh-button" type="button">刷新</button>
         </div>
@@ -63,7 +74,26 @@
     <div id="dialog-body" class="dialog-body"></div>
   </dialog>
 
+  <dialog id="student-dialog" class="student-dialog">
+    <form method="dialog" class="dialog-head">
+      <div><p class="eyebrow">LEARNER WORKSPACE</p><h2>添加学生</h2></div>
+      <button class="icon-button" aria-label="关闭学生管理">×</button>
+    </form>
+    <div class="dialog-body">
+      <div class="privacy-note"><strong>本机私有</strong><p>学生姓名与学习记录只写入本机数据库，不进入开源仓库。</p></div>
+      <form id="student-form">
+        <div class="form-grid two-columns">
+          <div class="field"><label for="student-name">显示名称</label><input id="student-name" name="display_name" maxlength="80" required autocomplete="off" placeholder="例如：Student A"></div>
+          <div class="field"><label for="student-timezone">时区</label><input id="student-timezone" name="timezone" value="Asia/Shanghai" required></div>
+          <div class="field span-2"><label for="student-subject">初始学科</label><select id="student-subject" name="subject_code"></select></div>
+        </div>
+        <div class="form-actions"><button class="button" type="submit">创建学生工作区</button></div>
+      </form>
+    </div>
+  </dialog>
+
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/assets/i18n.js" defer></script>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>

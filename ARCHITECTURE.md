@@ -30,6 +30,9 @@ flowchart LR
 ```mermaid
 erDiagram
     STUDENTS ||--o{ LEARNING_SESSIONS : participates
+    STUDENTS ||--o{ STUDENT_SUBJECTS : enrolls
+    SUBJECTS ||--o{ STUDENT_SUBJECTS : enables
+    SUBJECTS ||--o{ CONTENT_ITEMS : scopes
     LEARNING_SESSIONS ||--o{ ATTEMPTS : contains
     LEARNING_SESSIONS ||--o{ SESSION_OBSERVATIONS : records
     LEARNING_SESSIONS ||--o{ SESSION_PROGRESS : tracks
@@ -101,10 +104,12 @@ The score orders investigation; it does not itself establish a diagnosis. The co
 
 The repository contains no private configuration. Runtime selection uses `ENGLISH_TRACKER_DATA_DIR` and `ENGLISH_TRACKER_DB_NAME` or the global `--data-dir` option. The `.gitignore` excludes common database, backup, export, inbox, document, image, and audio formats.
 
+Multiple learners share one local schema while every learning fact retains `student_id`. Subjects are registered separately; every content item carries `subject_code`. The English adapter may read an external question bank, while generic subject workspaces can record lessons, assignments, and assessments without bundling source content.
+
 ## Known limitations
 
 - `simple-v1` is not an FSRS implementation. The schema can retain stability/difficulty fields for a future adapter.
 - Knowledge mapping imported from old free-text tags is deterministic but still marked by its evidence source.
 - Fine-grained rule mappings are provisional until manually reviewed; coverage reports separate confirmed and suggested counts.
-- The MVP uses SQLite and a local CLI, not a network service or multi-user authorization layer.
+- The MVP supports multiple learner profiles on one trusted local installation, but does not provide internet-facing identity, authentication, or authorization.
 - Timestamps are stored as ISO-8601 text; producers should include a timezone offset.

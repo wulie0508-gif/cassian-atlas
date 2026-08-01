@@ -7,6 +7,7 @@ htmlcov/
 .venv/
 venv/
 .env
+.env.*
 local_paths.yaml
 local_paths.yml
 local_paths.json
@@ -15,6 +16,9 @@ local_paths.json
 *.db
 *.db-wal
 *.db-shm
+*.jsonl
+*.csv
+*.tsv
 backups/
 exports/
 logs/
@@ -22,7 +26,10 @@ inbox/
 private/
 student-data/
 *.docx
+*.doc
 *.pdf
+*.pptx
+*.ppt
 *.xlsx
 *.xls
 *.png
@@ -30,4 +37,9 @@ student-data/
 *.jpeg
 *.wav
 *.mp3
-
+*.zip
+*.7z
+*.rar
+library_cache/
+question-bank/
+question_bank/

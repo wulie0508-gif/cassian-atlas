@@ -39,6 +39,7 @@ from .performance import reading_error_taxonomy, reading_passage_performance, se
 from .selection import weighted_set_cover
 from .util import random_id, utc_now
 from .weights import weight_policy_report, weighted_mastery_report
+from .workspace import app_config, create_student, student_summaries, subject_overview
 
 
 QUESTION_BANK_ENV = "ENGLISH_TRACKER_QUESTION_BANK"
@@ -115,9 +116,26 @@ class LearningHubHandler(BaseHTTPRequestHandler):
     def _conn(self):
         return connect(self.server.db_path)
 
+    def _selected_student(self, conn, *, query: dict | None = None, body: dict | None = None) -> str:
+        query = query or {}
+        body = body or {}
+        requested = (
+            body.get("student_id")
+            or self.headers.get("X-Student-ID")
+            or query.get("student_id", [None])[0]
+            or self.server.student_id
+        )
+        student_id = str(requested).strip()
+        if not conn.execute(
+            "SELECT 1 FROM students WHERE student_id=? AND active=1",
+            (student_id,),
+        ).fetchone():
+            raise ValueError(f"Unknown or inactive student_id: {student_id}")
+        return student_id
+
     def _static(self, path: str) -> None:
         name = "index.html" if path in {"/", "/index.html"} else path.removeprefix("/assets/")
-        if name not in {"index.html", "app.js", "styles.css"}:
+        if name not in {"index.html", "app.js", "i18n.js", "styles.css", "favicon.svg"}:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         package = resources.files("english_tracker.web")
@@ -127,7 +145,7 @@ class LearningHubHandler(BaseHTTPRequestHandler):
             return
         payload = target.read_bytes()
         content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
-        if name.endswith((".html", ".css", ".js")):
+        if name.endswith((".html", ".css", ".js", ".svg")):
             content_type += "; charset=utf-8"
         self.send_response(200)
         self.send_header("Content-Type", content_type)
@@ -148,6 +166,7 @@ class LearningHubHandler(BaseHTTPRequestHandler):
         conn = None
         try:
             conn = self._conn()
+            student_id = self._selected_student(conn, query=query)
             if path == "/api/health":
                 integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
                 self._send_json(
@@ -160,12 +179,24 @@ class LearningHubHandler(BaseHTTPRequestHandler):
                         "generated_at": utc_now(),
                     }
                 )
+            elif path == "/api/app-config":
+                self._send_json(app_config(conn))
+            elif path == "/api/students":
+                self._send_json(student_summaries(conn))
+            elif path == "/api/subject-overview":
+                self._send_json(
+                    subject_overview(
+                        conn,
+                        student_id,
+                        query.get("subject_code", ["english"])[0],
+                    )
+                )
             elif path == "/api/overview":
                 self._send_json(
-                    overview(conn, student_id=self.server.student_id, question_bank=self.server.question_bank)
+                    overview(conn, student_id=student_id, question_bank=self.server.question_bank)
                 )
             elif path == "/api/home":
-                self._send_json(low_friction_summary(conn, self.server.student_id))
+                self._send_json(low_friction_summary(conn, student_id))
             elif path == "/api/question-bank":
                 self._send_json(question_bank_summary(self.server.question_bank))
             elif path == "/api/questions":
@@ -181,7 +212,7 @@ class LearningHubHandler(BaseHTTPRequestHandler):
             elif path.startswith("/api/questions/"):
                 self._send_json(question_detail(self.server.question_bank, path.rsplit("/", 1)[-1], conn))
             elif path == "/api/mastery":
-                self._send_json(weighted_mastery_report(conn, self.server.student_id))
+                self._send_json(weighted_mastery_report(conn, student_id))
             elif path == "/api/weights":
                 self._send_json(weight_policy_report(conn))
             elif path == "/api/assessments":
@@ -200,7 +231,7 @@ class LearningHubHandler(BaseHTTPRequestHandler):
                         WHERE ls.student_id=? AND ls.record_status='active'
                         ORDER BY ls.started_at DESC
                         """,
-                        (self.server.student_id,),
+                        (student_id,),
                     )
                 ]
                 self._send_json({"count": len(rows), "items": rows})
@@ -208,7 +239,7 @@ class LearningHubHandler(BaseHTTPRequestHandler):
                 self._send_json(
                     session_performance(
                         conn,
-                        self.server.student_id,
+                        student_id,
                         domain=query.get("domain", [None])[0],
                         limit=int(query.get("limit", ["100"])[0]),
                     )
@@ -223,7 +254,7 @@ class LearningHubHandler(BaseHTTPRequestHandler):
                     reading_passage_performance(
                         conn,
                         self.server.question_bank,
-                        self.server.student_id,
+                        student_id,
                         passage_id,
                         session_id=query.get("session_id", [None])[0],
                         similar_limit=int(query.get("similar_limit", ["12"])[0]),
@@ -268,7 +299,7 @@ class LearningHubHandler(BaseHTTPRequestHandler):
             elif path.startswith("/api/context/"):
                 audience = path.rsplit("/", 1)[-1]
                 self._send_json(
-                    context_for(conn, audience, student_id=self.server.student_id, question_bank=self.server.question_bank)
+                    context_for(conn, audience, student_id=student_id, question_bank=self.server.question_bank)
                 )
             elif path == "/api/knowledge/search":
                 self._send_json(search_knowledge(conn, query.get("q", [""])[0], limit=int(query.get("limit", ["30"])[0])))
@@ -284,12 +315,12 @@ class LearningHubHandler(BaseHTTPRequestHandler):
                 minimum = int(query.get("minimum", ["2"])[0])
                 self._send_json(coverage_matrix(conn, passage_ids, minimum_confirmed_questions=minimum))
             elif path == "/api/reports/weekly":
-                self._send_json(weekly_report(conn, self.server.student_id, week_start=query.get("week_start", [None])[0]))
+                self._send_json(weekly_report(conn, student_id, week_start=query.get("week_start", [None])[0]))
             elif path == "/api/reports/trends":
                 today = datetime.now().astimezone().date()
                 start = query.get("start", [(today - timedelta(days=84)).isoformat()])[0]
                 end = query.get("end", [today.isoformat()])[0]
-                self._send_json(trend_report(conn, self.server.student_id, start=start, end=end))
+                self._send_json(trend_report(conn, student_id, start=start, end=end))
             elif path == "/api/contracts/dictation-ocr":
                 self._send_json(
                     {
@@ -313,7 +344,7 @@ class LearningHubHandler(BaseHTTPRequestHandler):
                 )
             elif path == "/api/dictation/plan":
                 limit = int(query.get("limit", ["20"])[0])
-                due = due_reviews(conn, self.server.student_id, domain="vocabulary", limit=limit)
+                due = due_reviews(conn, student_id, domain="vocabulary", limit=limit)
                 self._send_json({"generated_at": utc_now(), "plan_size": due["count"], "items": due["items"]})
             else:
                 self._error(404, "API endpoint not found")
@@ -332,6 +363,12 @@ class LearningHubHandler(BaseHTTPRequestHandler):
         try:
             body = self._body()
             conn = self._conn()
+            if path == "/api/students":
+                backup = create_backup(self.server.db_path, self.server.data_dir / "backups", "create-student")
+                result = create_student(conn, body)
+                self._send_json({"status": "created", "student": result, "backup": str(backup) if backup else None}, 201)
+                return
+            student_id = self._selected_student(conn, body=body)
             if path == "/api/assessments":
                 session_id = random_id("SES")
                 event_id = random_id("EVT")
@@ -342,7 +379,7 @@ class LearningHubHandler(BaseHTTPRequestHandler):
                     "event_id": event_id,
                     "idempotency_key": f"web:assessment:{session_id}:v1",
                     "source_thread": "manual",
-                    "student_id": self.server.student_id,
+                    "student_id": student_id,
                     "session": {
                         "session_id": session_id,
                         "session_type": body.get("assessment_kind", "topic_quiz"),
@@ -372,7 +409,7 @@ class LearningHubHandler(BaseHTTPRequestHandler):
                 result = weighted_set_cover(
                     conn,
                     target_codes,
-                    student_id=body.get("student_id", self.server.student_id),
+                    student_id=body.get("student_id", student_id),
                     recent_error_days=int(body.get("recent_error_days", 30)),
                     max_passages=int(body.get("max_passages", 5)),
                     as_of=body.get("as_of"),
@@ -381,7 +418,7 @@ class LearningHubHandler(BaseHTTPRequestHandler):
             elif path == "/api/classroom/attempts":
                 payload = dict(body)
                 payload.setdefault("source_thread", "courseware")
-                payload.setdefault("student_id", self.server.student_id)
+                payload.setdefault("student_id", student_id)
                 backup = create_backup(self.server.db_path, self.server.data_dir / "backups", "web-classroom-attempts")
                 result = import_attempts(conn, payload, backup_path=str(backup) if backup else None)
                 self._send_json({"status": "created", "result": result}, 201)
@@ -390,7 +427,7 @@ class LearningHubHandler(BaseHTTPRequestHandler):
                 payload.setdefault("event_id", random_id("EVT"))
                 payload.setdefault("idempotency_key", f"web:reading-diagnostics:{payload['event_id']}:v1")
                 payload.setdefault("source_thread", "courseware")
-                payload.setdefault("student_id", self.server.student_id)
+                payload.setdefault("student_id", student_id)
                 backup = create_backup(self.server.db_path, self.server.data_dir / "backups", "web-reading-diagnostics")
                 result = import_attempt_diagnostics(conn, payload, backup_path=str(backup) if backup else None)
                 self._send_json({"status": "created", "result": result}, 201)
@@ -439,7 +476,7 @@ class LearningHubHandler(BaseHTTPRequestHandler):
                     "event_id": session_event,
                     "idempotency_key": f"web:dictation:{session_id}:session:v1",
                     "source_thread": "dictation",
-                    "student_id": self.server.student_id,
+                    "student_id": student_id,
                     "session": {
                         "session_id": session_id,
                         "session_type": "dictation",
@@ -462,7 +499,7 @@ class LearningHubHandler(BaseHTTPRequestHandler):
                     "event_id": attempts_event,
                     "idempotency_key": f"web:dictation:{session_id}:attempts:v1",
                     "source_thread": "dictation",
-                    "student_id": self.server.student_id,
+                    "student_id": student_id,
                     "session_id": session_id,
                     "attempts": attempts,
                 }

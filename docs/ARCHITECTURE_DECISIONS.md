@@ -18,6 +18,9 @@
 14. Full-library parsing is a staging layer in the unified learning system, not a second student database. Automated candidates remain `suggested`/`needs_check` until source review.
 15. Text parsing and audio indexing are separate completion claims. An indexed audio file is paired and searchable by metadata but is never described as transcribed without transcript evidence.
 16. Three conversations exchange live context and writes through a local HTTP API; the Markdown handoff remains the durable contract and fallback.
+17. Multiple learners use one normalized store but every performance query and write resolves an explicit `student_id`.
+18. Subject registration is generic. English owns a specialized adapter; other subjects can record evidence without inheriting English question-bank assumptions.
+19. Interface locale is presentation state only. Switching Chinese/English never mutates evidence facts.
 
 ## Risks and controls
 

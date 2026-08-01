@@ -130,6 +130,14 @@ def initialize_database(
             """,
             (student_id, display_name, now, now),
         )
+        conn.execute(
+            """
+            INSERT INTO student_subjects(student_id,subject_code,active,enrolled_at)
+            VALUES (?,'english',1,?)
+            ON CONFLICT(student_id,subject_code) DO UPDATE SET active=1
+            """,
+            (student_id, now),
+        )
     conn.close()
     return {"database": str(db_path), "migrations_applied": migrations, "student_id": student_id}
 

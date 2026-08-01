@@ -72,10 +72,10 @@ class RepositoryPrivacyTest(unittest.TestCase):
         forbidden = (
             "胡" + "楠",
             "C:\\Users\\" + "huawei",
-            "D:\\" + "找回的文件",
+            "D:\\" + "".join(chr(code) for code in (0x627E, 0x56DE, 0x7684, 0x6587, 0x4EF6)),
             "hunan" + "_learning",
         )
-        allowed_suffixes = {".py", ".md", ".json", ".yaml", ".yml", ".toml", ".sql", ".txt"}
+        allowed_suffixes = {".py", ".md", ".json", ".yaml", ".yml", ".toml", ".sql", ".txt", ".js", ".css", ".html", ".svg", ".ps1", ".cmd", ".sh"}
         violations = []
         for path in root.rglob("*"):
             if not path.is_file() or path.suffix.lower() not in allowed_suffixes:
@@ -86,6 +86,17 @@ class RepositoryPrivacyTest(unittest.TestCase):
             for token in forbidden:
                 if token in text:
                     violations.append(f"{path.relative_to(root)}: {token}")
+        self.assertEqual(violations, [])
+
+    def test_repository_contains_no_private_content_artifacts(self):
+        root = Path(__file__).resolve().parents[1]
+        blocked = {".sqlite", ".sqlite3", ".db", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".png", ".jpg", ".jpeg", ".wav", ".mp3", ".zip", ".7z", ".rar"}
+        violations = []
+        for path in root.rglob("*"):
+            if not path.is_file() or any(part in {".git", "__pycache__"} or part.endswith(".egg-info") for part in path.parts):
+                continue
+            if path.suffix.lower() in blocked:
+                violations.append(str(path.relative_to(root)))
         self.assertEqual(violations, [])
 
     def test_json_contracts_are_valid_json(self):
