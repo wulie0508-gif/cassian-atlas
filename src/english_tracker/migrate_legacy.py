@@ -173,10 +173,81 @@ def migrate_legacy(
         with conn:
             created, existing = _begin_event(conn, payload, "legacy_migration", backup_path)
             if not created:
+                after_counts = {
+                    table: conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+                    for table in (
+                        "content_items",
+                        "attempts",
+                        "evaluations",
+                        "review_state",
+                        "review_tasks",
+                        "external_references",
+                        "legacy_records",
+                    )
+                }
+                mastery_history_linked = conn.execute(
+                    """SELECT COUNT(*) FROM legacy_records
+                       WHERE source_system='mastery_json' AND record_type='history'
+                         AND migration_status='linked'"""
+                ).fetchone()[0]
+                mastery_history_retained = conn.execute(
+                    """SELECT COUNT(*) FROM legacy_records
+                       WHERE source_system='mastery_json' AND record_type='history'
+                         AND migration_status='retained_only'"""
+                ).fetchone()[0]
+                mastery_new_items = conn.execute(
+                    "SELECT COUNT(*) FROM content_items WHERE legacy_ref LIKE 'mastery_json.items:%'"
+                ).fetchone()[0]
+                victor_links = conn.execute(
+                    """SELECT COUNT(*) FROM external_references
+                       WHERE namespace='victor_vocab' AND reference_type='vocab_entry'"""
+                ).fetchone()[0]
+                # Recalculate how many deterministic Victor matches shared an
+                # already-linked entry; these are preserved as separate legacy
+                # items but intentionally do not receive a duplicate canonical ref.
+                victor_by_page_head: dict[tuple[int | None, str], list[str]] = defaultdict(list)
+                for row in victor.execute("SELECT book_page,headword,entry_id FROM vocab_entries"):
+                    victor_by_page_head[(row["book_page"], _norm(row["headword"]))].append(row["entry_id"])
+                matched_entries = []
+                for row in legacy.execute("SELECT domain,source_page,answer FROM content_items"):
+                    if row["domain"] != "vocabulary":
+                        continue
+                    candidates = victor_by_page_head.get((row["source_page"], _answer_head(row["answer"])), [])
+                    if len(candidates) == 1:
+                        matched_entries.append(candidates[0])
+                source_hashes_after = {
+                    "legacy_review_db": _sha256(legacy_path),
+                    "mastery_json": _sha256(mastery_path),
+                    "victor_vocab_db": _sha256(victor_path),
+                }
                 return {
                     "status": "duplicate",
                     "event_id": event_id,
+                    "source_integrity": {"legacy_review_db": legacy_integrity, "victor_vocab_db": victor_integrity},
+                    "source_hashes_before": source_hashes,
+                    "source_hashes_after": source_hashes_after,
+                    "source_unchanged": source_hashes == source_hashes_after,
                     "source_counts": legacy_counts,
+                    "expected_reconciliation": {
+                        "legacy_content_items_expected": 372,
+                        "legacy_attempts_expected": 298,
+                        "content_items_match": legacy_counts["content_items"] == 372,
+                        "attempts_match": legacy_counts["attempts"] == 298,
+                    },
+                    "mastery_json": {
+                        "items": len(mastery_items),
+                        "history_rows": sum(len(item.get("history") or []) for item in mastery_items),
+                        "item_links": conn.execute("SELECT COUNT(*) FROM external_references WHERE namespace='mastery_json'").fetchone()[0],
+                        "new_items": mastery_new_items,
+                        "history_linked_to_legacy_attempt": mastery_history_linked,
+                        "history_retained_without_fabricated_attempt": mastery_history_retained,
+                    },
+                    "victor_vocab": {
+                        "source_entries": victor_count,
+                        "linked_unique_entries": victor_links,
+                        "duplicate_legacy_candidates_not_relinked": len(matched_entries) - len(set(matched_entries)),
+                    },
+                    "target_counts_after_migration": after_counts,
                     "existing": existing,
                 }
             if not conn.execute("SELECT 1 FROM students WHERE student_id=?", (student_id,)).fetchone():
