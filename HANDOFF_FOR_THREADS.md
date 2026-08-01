@@ -19,10 +19,13 @@ Invoke-RestMethod http://127.0.0.1:8788/api/context/courseware
 Invoke-RestMethod http://127.0.0.1:8788/api/context/dictation
 ```
 
+Agent operating rule: the default product mode is `low_friction_v1`. When the user provides classroom, reading, dictation, or test results, the responsible conversation performs the relevant API call itself. Do not ask the user to repeat the same information in a website form. Reply with the current state, the smallest next action, and any decision that genuinely needs user confirmation. Full audited state is still available to the Agent and through the website's **查看专业数据** switch.
+
 The responses contain current weaknesses, due reviews, project status, question-bank counts and the applicable endpoint map. Stable endpoints:
 
 | Need | Method and endpoint |
 | --- | --- |
+| Low-friction current state and next action | `GET /api/home` |
 | One verified question and deep detail | `GET /api/questions/{question_id}` |
 | One grammar question's normalized mappings | `GET /api/grammar/questions/{question_id}` |
 | One complete passage coverage | `GET /api/grammar/passages/{passage_id}/coverage` |

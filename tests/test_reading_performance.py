@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from english_tracker.contracts import ContractError
 from english_tracker.db import connect, database_path, initialize_database
-from english_tracker.dashboard import learning_summary
+from english_tracker.dashboard import learning_summary, low_friction_summary
 from english_tracker.ingest import IngestConflict, import_attempt_diagnostics, import_attempts, import_session
 from english_tracker.performance import reading_passage_performance, session_performance
 
@@ -130,6 +130,18 @@ class ReadingPerformanceTest(unittest.TestCase):
         self.conn.execute("UPDATE attempts SET record_status='voided' WHERE attempt_id=?", (attempt_id,))
         self.conn.commit()
         self.assertEqual(learning_summary(self.conn, "STU-001")["counts"]["attempts"], 1)
+
+    def test_low_friction_summary_keeps_action_surface_small(self):
+        summary = low_friction_summary(self.conn, "STU-001")
+        self.assertEqual(summary["mode"], "low_friction_v1")
+        self.assertEqual(summary["current"]["attempt_count"], 2)
+        self.assertEqual(summary["current"]["reading_attempt_count"], 2)
+        self.assertEqual(summary["current"]["calibration_anchor_count"], 0)
+        self.assertEqual(summary["current"]["dictation_plan_size"], 0)
+        self.assertEqual(summary["current"]["vocabulary_due_total"], 0)
+        self.assertEqual(len(summary["automation"]), 3)
+        self.assertTrue(any("线下测" in item["owner"] for item in summary["next_actions"]))
+        self.assertIn("performance", summary["detail_endpoints"])
 
     def test_reading_passage_keeps_test_points_separate_from_error_causes(self):
         report = reading_passage_performance(self.conn, self.question_bank, "STU-001", "PAS-READ-1")

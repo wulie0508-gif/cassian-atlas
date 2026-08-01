@@ -8,6 +8,7 @@ from .analytics import due_reviews, export_context
 from .db import connect
 from .library import library_summary
 from .metrics import trend_report, weekly_report
+from .performance import session_performance
 from .quality import run_quality_checks
 from .util import utc_now
 from .weights import weighted_mastery_report
@@ -207,8 +208,131 @@ def learning_summary(conn, student_id: str) -> dict[str, Any]:
         "question_deep_knowledge_map": conn.execute("SELECT COUNT(*) FROM question_deep_knowledge_map WHERE verification_status<>'rejected'").fetchone()[0],
     }
     due = due_reviews(conn, student_id, limit=20)
+    due_total = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM review_tasks rt
+        JOIN content_items ci ON ci.item_id=rt.item_id AND ci.record_status='active'
+        WHERE rt.student_id=? AND rt.status='open' AND rt.due_at<=?
+        """,
+        (student_id, due["as_of"]),
+    ).fetchone()[0]
     mastery = weighted_mastery_report(conn, student_id)
-    return {"counts": counts, "due_review_count": due["count"], "mastery": mastery}
+    return {
+        "counts": counts,
+        "due_review_count": due_total,
+        "due_review_batch_size": due["count"],
+        "mastery": mastery,
+    }
+
+
+def low_friction_summary(conn, student_id: str) -> dict[str, Any]:
+    """Return the small, deterministic surface a learner or agent needs first.
+
+    Detailed evidence remains available from the specialist endpoints.  This
+    summary intentionally avoids asking the user to maintain duplicate forms.
+    """
+    performance = session_performance(conn, student_id, limit=500)
+    sessions = performance["items"]
+    attempts = sum(int(row["attempt_count"]) for row in sessions)
+    scored = sum(int(row["scored_attempt_count"]) for row in sessions)
+    score = sum(float(row["derived_score"]) for row in sessions)
+    reading_attempts = sum(
+        int(domain["attempt_count"])
+        for row in sessions
+        for domain in row["domains"]
+        if domain["domain"] == "reading"
+    )
+    anchors = sum(bool(row["is_calibration_anchor"]) for row in sessions)
+    vocabulary_due = due_reviews(conn, student_id, domain="vocabulary", limit=20)
+    vocabulary_due_total = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM review_tasks rt
+        JOIN content_items ci ON ci.item_id=rt.item_id AND ci.record_status='active'
+        WHERE rt.student_id=? AND rt.status='open' AND rt.due_at<=? AND ci.domain='vocabulary'
+        """,
+        (student_id, vocabulary_due["as_of"]),
+    ).fetchone()[0]
+    mastery = weighted_mastery_report(conn, student_id)
+    workflow = workflow_summary(conn)
+    critical_issues = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM attempts a
+        WHERE a.record_status='active'
+          AND NOT EXISTS (
+            SELECT 1 FROM evaluations e
+            WHERE e.attempt_id=a.attempt_id AND e.is_current=1
+          )
+        """
+    ).fetchone()[0]
+
+    next_actions = [
+        {
+            "priority": 1,
+            "owner": "你只需",
+            "title": "把结果交给对应对话",
+            "detail": "课堂与阅读交给课件对话，听写交给单词听写对话；Agent 会写入统一数据库，网站无需重复录入。",
+        }
+    ]
+    if reading_attempts == 0:
+        next_actions.append(
+            {
+                "priority": 2,
+                "owner": "下次阅读后",
+                "title": "把文章编号和逐题答案交给课件对话",
+                "detail": "系统将自动保存得分、考点与可核验错因；没有原始答案时不会反推错因。",
+            }
+        )
+    if anchors == 0:
+        next_actions.append(
+            {
+                "priority": 3,
+                "owner": "下次线下测后",
+                "title": "把得分、满分和用时交给课件对话",
+                "detail": "线下闭卷结果只作为高权重校准锚点，不会覆盖平时真实成绩。",
+            }
+        )
+
+    return {
+        "generated_at": utc_now(),
+        "mode": "low_friction_v1",
+        "headline": "后台已接通，平时不用维护网站",
+        "current": {
+            "session_count": len(sessions),
+            "attempt_count": attempts,
+            "scored_attempt_count": scored,
+            "descriptive_accuracy": round(score / scored, 4) if scored else None,
+            "weighted_accuracy": mastery["summary"]["weighted_accuracy"],
+            "reading_attempt_count": reading_attempts,
+            "calibration_anchor_count": anchors,
+            "dictation_plan_size": vocabulary_due["count"],
+            "vocabulary_due_total": vocabulary_due_total,
+        },
+        "automation": [
+            {
+                "key": channel["channel_key"],
+                "name": channel["display_name"],
+                "status": channel["status"],
+                "does": channel["responsibility"],
+                "context_endpoint": channel["context_endpoint"],
+            }
+            for channel in workflow["channels"]
+        ],
+        "next_actions": next_actions,
+        "data_health": {
+            "status": "ready" if critical_issues == 0 else "attention",
+            "critical_issue_count": critical_issues,
+            "definition": "首页只执行关键事实轻量检查；完整 20 项审计由 /api/overview 和 data check 提供。",
+        },
+        "detail_endpoints": {
+            "performance": "/api/performance/sessions",
+            "mastery": "/api/mastery",
+            "weekly_report": "/api/reports/weekly",
+            "dictation_plan": "/api/dictation/plan",
+        },
+    }
 
 
 def overview(
@@ -239,6 +363,12 @@ def context_for(conn, audience: str, *, student_id: str, question_bank: str | Pa
         result = export_context(conn, student_id, audience)
         result["system_notice"] = workflow_summary(conn)["system_notice"]
         result["question_bank"] = question_bank_summary(question_bank)["counts"]
+        result["operating_mode"] = {
+            "name": "low_friction_v1",
+            "principle": "后台精确、前台减负。Agent 默认执行查询和写入，不要求用户在网站重复维护。",
+            "user_default": "只向用户说明当前状态、唯一下一步和需要其确认的异常。",
+            "home_summary": "/api/home",
+        }
         result["web_endpoints"] = {
             "question_search": "/api/questions",
             "knowledge_search": "/api/knowledge/search",
@@ -258,6 +388,10 @@ def context_for(conn, audience: str, *, student_id: str, question_bank: str | Pa
             "trend_report": "/api/reports/trends",
         }
         result["agent_trigger_rules"] = [
+            {
+                "when": "用户提供课堂、阅读、听写或测试结果时",
+                "action": "Agent 直接调用对应接口完成查询、批改或写入；不要把常规录入工作推回给用户操作网站。",
+            },
             {
                 "when": "完成一次课堂、语法填空、阅读、听写或其他练习后",
                 "action": "调用 record_classroom_attempts 写入逐题作答；这些就是真实成绩，不要等线下测试。",
@@ -294,6 +428,11 @@ def context_for(conn, audience: str, *, student_id: str, question_bank: str | Pa
             "workflow": workflow_summary(conn),
             "library": library_summary(conn),
             "quality": run_quality_checks(conn),
+            "operating_mode": {
+                "name": "low_friction_v1",
+                "principle": "后台保留完整证据与审计，前台默认仅显示当前状态、下一步和自动化健康。",
+                "home_summary": "/api/home",
+            },
         }
     raise ValueError("audience must be engineering, courseware, or dictation")
 

@@ -2,15 +2,21 @@ const view = document.querySelector('#view');
 const pageTitle = document.querySelector('#page-title');
 const eyebrow = document.querySelector('#section-eyebrow');
 const freshness = document.querySelector('#freshness');
+const detailButton = document.querySelector('#detail-mode-button');
 const toast = document.querySelector('#toast');
 const dialog = document.querySelector('#question-dialog');
-const state = { current: 'overview', cache: {}, dictation: [] };
+const state = {
+  current: 'overview',
+  cache: {},
+  dictation: [],
+  detailMode: window.localStorage.getItem('hunan-hub-detail-mode') === 'true',
+};
 
 const titles = {
   overview: ['项目总览', 'PROJECT CONTROL'],
   'question-bank': ['题库与知识', 'QUESTION LIBRARY'],
   mastery: ['学情掌握', 'LEARNING EVIDENCE'],
-  assessments: ['课堂成绩', 'CLASSROOM PERFORMANCE'],
+  assessments: ['学习记录', 'LEARNING RECORDS'],
   library: ['解析中心', 'PARSING PIPELINE'],
   dictation: ['单词听写', 'DICTATION AUTOMATION'],
   workflow: ['三个对话', 'WORKFLOW CONTRACTS'],
@@ -55,7 +61,33 @@ function panel(title, subtitle, body, action = '') {
   return `<section class="panel"><div class="panel-head"><div><h2>${esc(title)}</h2><p>${esc(subtitle)}</p></div>${action}</div><div class="panel-body">${body}</div></section>`;
 }
 
+function applyDetailMode() {
+  document.body.classList.toggle('detail-mode', state.detailMode);
+  detailButton.setAttribute('aria-pressed', String(state.detailMode));
+  detailButton.textContent = state.detailMode ? '返回减负模式' : '查看专业数据';
+}
+
 async function renderOverview(force = false) {
+  const home = !force && state.cache.home ? state.cache.home : await api('/api/home');
+  state.cache.home = home;
+  const primaryAction = home.next_actions[0];
+  const automationCards = home.automation.map(item => `<article class="automation-card"><div class="automation-status"><span class="health-dot ${item.status === 'ready' ? 'ok' : 'error'}"></span>${status(item.status)}</div><h3>${esc(item.name)}</h3><p>${esc(item.does)}</p></article>`).join('');
+  const simpleMarkup = `
+    <section class="relief-hero">
+      <div class="relief-copy"><p class="eyebrow">LOW-FRICTION MODE</p><h2>${esc(home.headline)}</h2><p>课堂、阅读、听写和线下测试都由对应 Agent 调用统一接口。你不需要再抄表、重复录入或手写交接。</p></div>
+      <div class="next-action"><span>${esc(primaryAction.owner)}</span><strong>${esc(primaryAction.title)}</strong><p>${esc(primaryAction.detail)}</p></div>
+    </section>
+    <section class="quick-facts" aria-label="当前学习状态">
+      ${metric('当前成绩', pct(home.current.weighted_accuracy, 1), `${num(home.current.scored_attempt_count)} 次有效评分`)}
+      ${metric('已记录作答', num(home.current.attempt_count), `${num(home.current.session_count)} 次学习活动`, 'good')}
+      ${metric('本次听写批次', num(home.current.dictation_plan_size), `${num(home.current.vocabulary_due_total)} 项到期任务由对话分批处理`, home.current.dictation_plan_size ? 'attention' : 'good')}
+    </section>
+    <section class="section-intro"><div><p class="eyebrow">AUTOMATION</p><h2>三个对话都已接通</h2></div><p>平时直接对话，Agent 在后台读写；只有遇到无法判断的内容才需要你确认。</p></section>
+    <div class="automation-grid">${automationCards}</div>`;
+  if (!state.detailMode) {
+    view.innerHTML = simpleMarkup;
+    return;
+  }
   const data = !force && state.cache.overview ? state.cache.overview : await api('/api/overview');
   state.cache.overview = data;
   const q = data.question_bank.counts;
@@ -77,15 +109,17 @@ async function renderOverview(force = false) {
   const calibrationBody = calibration == null
     ? `<div class="callout amber"><h3>高权重校准锚点待补充</h3><p>现有课堂与平时作答已经是真实成绩。当前只缺正式线下闭卷整卷或双周混合测，用于校准平时训练是否能迁移到受控环境。</p></div>`
     : `<div class="split-stat"><div><small>线下校准</small><strong>${pct(calibration, 1)}</strong></div><div><small>日常练习</small><strong>${pct(practice, 1)}</strong></div></div><p class="subtle">差值 ${pct(mastery.summary.calibration_gap, 1)}；正值表示受控环境表现更好。</p>`;
-  view.innerHTML = `
-    <section class="metric-strip">
-      ${metric('结构化题目', num(q.questions), `${num(q.usable_questions)} 道可直接使用`, 'good')}
-      ${metric('真实作答', num(l.counts.attempts), `${num(l.due_review_count)} 项当前到期复测`, l.due_review_count ? 'attention' : 'good')}
-      ${metric('加权掌握率', pct(mastery.summary.weighted_accuracy, 1), `有效样本 ${num(mastery.summary.weighted_sample_size)}`)}
-      ${metric('深层知识映射', num(l.counts.question_deep_knowledge_map), `${num(l.counts.question_enrichments)} 条解析单元`)}
-      ${metric('资料可追踪', pct(lib.state_coverage_rate, 1), `${num(lib.completed_resources)} 文本已解析 · ${num(lib.audio_resources)} 音频已配对`)}
-    </section>
-    <div class="dashboard-grid">
+  view.innerHTML = `${simpleMarkup}
+    <div class="detail-only">
+      <div class="detail-divider"><span>专业数据</span></div>
+      <section class="metric-strip">
+        ${metric('结构化题目', num(q.questions), `${num(q.usable_questions)} 道可直接使用`, 'good')}
+        ${metric('真实作答', num(l.counts.attempts), `${num(l.due_review_count)} 项当前到期复测`, l.due_review_count ? 'attention' : 'good')}
+        ${metric('加权掌握率', pct(mastery.summary.weighted_accuracy, 1), `有效样本 ${num(mastery.summary.weighted_sample_size)}`)}
+        ${metric('深层知识映射', num(l.counts.question_deep_knowledge_map), `${num(l.counts.question_enrichments)} 条解析单元`)}
+        ${metric('资料可追踪', pct(lib.state_coverage_rate, 1), `${num(lib.completed_resources)} 文本已解析 · ${num(lib.audio_resources)} 音频已配对`)}
+      </section>
+      <div class="dashboard-grid">
       <div class="stack">
         ${panel('当前薄弱信号', '按证据权重与样本量排序；单题错误仍标为暂定', barList(weakest, {format: value => pct(value, 0), max: 1, tone: 'amber'}))}
         ${panel('题库主要构成', '真实题库 question_type 分布', barList(questionTypes))}
@@ -94,6 +128,7 @@ async function renderOverview(force = false) {
         ${panel('线下测试校准', '线下闭卷证据权重高于课堂与家庭练习', calibrationBody, '<button class="panel-action" data-nav="assessments">录入成绩 →</button>')}
         ${panel('工程进度', '从数据库自动读取，不再依赖手写交接百分比', `<div class="progress-list">${progressBody}</div>`, '<button class="panel-action" data-nav="workflow">查看职责 →</button>')}
         ${panel('数据健康', '同一数据库与只读题库的当前状态', `<div class="callout"><h3>${data.quality.trust_status === 'ready' ? '数据可用' : '需要关注'}</h3><p>${num(data.quality.checks_passed)} / ${num(data.quality.checks_total)} 项检查通过。题库路径和解析状态均由本机读取。</p></div>`)}
+      </div>
       </div>
     </div>`;
 }
@@ -214,15 +249,21 @@ async function renderAssessments() {
   const totalMaximum = sessions.reduce((sum,row) => sum + Number(row.derived_max_score || 0), 0);
   const totalAttempts = sessions.reduce((sum,row) => sum + Number(row.attempt_count || 0), 0);
   const anchors = sessions.filter(row => row.is_calibration_anchor).length;
+  const recentSessions = sessions.slice(0, 3);
   view.innerHTML = `
-    <section class="metric-strip">
-      ${metric('成绩课次', num(sessions.length), '每次有逐题作答的课都计入')}
-      ${metric('真实作答', num(totalAttempts), '课堂、作业、听写与测试')}
-      ${metric('描述正确率', pct(totalMaximum ? totalScore / totalMaximum : null, 1), `${num(totalScore)} / ${num(totalMaximum)}`)}
-      ${metric('校准锚点', num(anchors), '线下闭卷整卷/混合测')}
-      ${metric('阅读诊断', '按篇追踪', '考点与学生错因分开')}
+    <section class="relief-hero compact-hero">
+      <div class="relief-copy"><p class="eyebrow">REAL EVIDENCE</p><h2>每次作答都是成绩，线下测试负责校准</h2><p>课堂、阅读、语法、作业和听写都会自动累计；线下闭卷权重更高，但不会覆盖日常证据。</p></div>
+      <div class="next-action"><span>你只需</span><strong>把本次结果发给对应对话</strong><p>课件对话或听写对话会保存逐题结果；有阅读原始答案时，再自动生成可核验错因。</p></div>
     </section>
-    <div class="dashboard-grid">
+    <section class="quick-facts" aria-label="成绩摘要">
+      ${metric('已记录作答', num(totalAttempts), `${num(sessions.length)} 次学习活动`, 'good')}
+      ${metric('当前正确率', pct(totalMaximum ? totalScore / totalMaximum : null, 1), `${num(totalScore)} / ${num(totalMaximum)}`)}
+      ${metric('线下校准', anchors ? `${num(anchors)} 次` : '待首次', anchors ? '已纳入高权重证据' : '下次线下测后交给课件对话', anchors ? 'good' : 'attention')}
+    </section>
+    ${panel('最近三次记录', '快速确认数据是否已经进库；完整记录在专业数据中', `<div class="record-list">${recentSessions.map(row => `<article><div><strong>${esc(row.title)}</strong><small>${esc(String(row.started_at).slice(0,10))} · ${(row.domains || []).map(d => esc(d.domain)).join(' / ')}</small></div><div><strong>${num(row.derived_score)} / ${num(row.derived_max_score)}</strong><small>${pct(row.accuracy,1)}</small></div></article>`).join('') || '<div class="empty-state">尚无作答记录</div>'}</div>`)}
+    <div class="detail-only">
+      <div class="detail-divider"><span>专业数据与应急录入</span></div>
+      <div class="dashboard-grid">
       <div class="stack">
         ${panel('真实课堂成绩', '从逐题作答自动汇总；即使未单独录入一张试卷总分，成绩也不会丢失', `<div class="table-wrap"><table><thead><tr><th>日期</th><th>课次</th><th>范围</th><th>作答</th><th>对/错</th><th>正确率</th><th>证据</th></tr></thead><tbody>${sessions.map(row => `<tr><td>${esc(String(row.started_at).slice(0,10))}</td><td><strong>${esc(row.title)}</strong><br><small class="mono">${esc(row.session_id)}</small></td><td>${(row.domains || []).map(d => `${esc(d.domain)} ${num(d.attempt_count)}`).join('<br>')}</td><td>${num(row.derived_score)} / ${num(row.derived_max_score)}</td><td>${num(row.correct_count)} / ${num(row.wrong_count + row.partial_count)}</td><td>${pct(row.accuracy,1)}</td><td>${row.is_calibration_anchor ? '<span class="status-tag verified">校准锚点</span>' : '<span class="status-tag">日常真实成绩</span>'}</td></tr>`).join('') || '<tr><td colspan="7">尚无作答记录</td></tr>'}</tbody></table></div>`)}
         ${panel('阅读整篇诊断', '输入 passage_id，查看本篇考什么、错几题、为什么错和同类题', `<form id="reading-performance-search" class="toolbar"><div class="field grow"><label for="reading-passage-id">文章 passage_id</label><input id="reading-passage-id" name="passage_id" required placeholder="PAS-..."></div><div class="field grow"><label for="reading-session-id">限定课次（可选）</label><input id="reading-session-id" name="session_id" placeholder="SES-..."></div><button class="button" type="submit">生成诊断</button></form><div id="reading-performance-results"><p class="subtle">题目知识点表示“考什么”；作答错因表示“学生为什么错”，两者不混用。</p></div>`)}
@@ -242,6 +283,7 @@ async function renderAssessments() {
       <div class="stack">
         ${panel('证据权重', weights.policy_version, barList(weights.assessment_policies.filter(row => row.delivery_mode === 'offline_closed'), {label:'assessment_kind', value:'evidence_weight', max: 1.6, format: v => v.toFixed(2)}))}
         ${panel('题目修正项', '测试权重还会乘以题目与证据质量', `<div class="definition-list">${weights.question_rules.map(rule => `<div><dt>${esc(rule.dimension)} · ${esc(rule.match_value)}</dt><dd><strong>× ${Number(rule.multiplier).toFixed(2)}</strong>　${esc(rule.rationale)}</dd></div>`).join('')}</div>`)}
+      </div>
       </div>
     </div>`;
   document.querySelector('#test-date').value = new Date().toISOString().slice(0,10);
@@ -329,29 +371,39 @@ async function renderDictation() {
   const data = await api('/api/dictation/plan?limit=20');
   state.dictation = data.items;
   view.innerHTML = `
-    <section class="metric-strip">
-      ${metric('本次清单', num(data.plan_size), '从到期复测队列自动生成')}
-      ${metric('原始答案', '逐项保存', '允许后续分析真实错因', 'good')}
-      ${metric('批改方式', '本地精确匹配', '无需再次消耗模型 token')}
-      ${metric('写入位置', '统一数据库', '同一 session + attempts')}
-      ${metric('OCR/API', '接口预留', '生产者后续按同一契约接入')}
+    <section class="relief-hero compact-hero">
+      <div class="relief-copy"><p class="eyebrow">DICTATION AUTOMATION</p><h2>听写固定工作流已接通</h2><p>单词听写对话会自动取到期词、保留 OCR 原始答案、本地精确批改、写入成绩并安排复测。</p></div>
+      <div class="next-action"><span>你只需</span><strong>把听写结果发给单词听写对话</strong><p>网站不要求你重复录入；下方手动表格只作为断网或接口异常时的应急入口。</p></div>
     </section>
-    <section class="panel" style="margin-top:18px">
-      <div class="panel-head"><div><h2>今日听写</h2><p>保存后自动批改并进入复测调度</p></div><button class="button button-secondary button-small" data-action="dictation-refresh">换一批</button></div>
-      <div class="panel-body">
-        ${data.items.length ? `<form id="dictation-form"><div class="table-wrap"><table><thead><tr><th>#</th><th>提示</th><th>连续错误</th><th>学生原始答案</th></tr></thead><tbody>${data.items.map((row,index) => `<tr><td>${index+1}</td><td>${esc(row.prompt_snapshot || row.item_id)}<br><small class="mono subtle">${esc(row.item_id)}</small></td><td>${num(row.consecutive_errors)}</td><td><input name="answer-${index}" aria-label="第${index+1}题学生答案" autocomplete="off"></td></tr>`).join('')}</tbody></table></div><div class="form-actions"><button class="button" type="submit">批改并保存</button></div></form>` : '<div class="empty-state"><h2>当前没有到期词汇</h2><p>复测队列清空，或尚未导入词汇任务。</p></div>'}
-      </div>
-    </section>`;
+    <section class="quick-facts" aria-label="听写自动化状态">
+      ${metric('本次待复测', num(data.plan_size), '对话会自动读取', data.plan_size ? 'attention' : 'good')}
+      ${metric('批改', '本地规则', '重复使用不消耗模型 token', 'good')}
+      ${metric('结果去向', '统一数据库', '成绩与错题同步更新', 'good')}
+    </section>
+    <section class="automation-steps" aria-label="听写处理步骤">
+      <article><span>01</span><div><strong>Agent 取清单</strong><p>按到期日、优先级和连续错误自动取词。</p></div></article>
+      <article><span>02</span><div><strong>OCR 保留原文</strong><p>识别结果不先改正，确保错因可追溯。</p></div></article>
+      <article><span>03</span><div><strong>确定性批改</strong><p>本地精确匹配并记录 correct / wrong / partial。</p></div></article>
+      <article><span>04</span><div><strong>自动排复测</strong><p>错误进入复习队列，后续对话直接调用。</p></div></article>
+    </section>
+    <div class="detail-only">
+      <div class="detail-divider"><span>应急手动入口</span></div>
+      <section class="panel">
+        <div class="panel-head"><div><h2>手动批改清单</h2><p>仅在 Agent 或 OCR 接口不可用时使用</p></div><button class="button button-secondary button-small" data-action="dictation-refresh">换一批</button></div>
+        <div class="panel-body">
+          ${data.items.length ? `<form id="dictation-form"><div class="table-wrap"><table><thead><tr><th>#</th><th>提示</th><th>连续错误</th><th>学生原始答案</th></tr></thead><tbody>${data.items.map((row,index) => `<tr><td>${index+1}</td><td>${esc(row.prompt_snapshot || row.item_id)}<br><small class="mono subtle">${esc(row.item_id)}</small></td><td>${num(row.consecutive_errors)}</td><td><input name="answer-${index}" aria-label="第${index+1}题学生答案" autocomplete="off"></td></tr>`).join('')}</tbody></table></div><div class="form-actions"><button class="button" type="submit">批改并保存</button></div></form>` : '<div class="empty-state"><h2>当前没有到期词汇</h2><p>复测队列清空，或尚未导入词汇任务。</p></div>'}
+        </div>
+      </section>
+    </div>`;
 }
 
 async function renderWorkflow() {
   const data = await api('/api/workflow');
   const notice = data.system_notice || {};
   view.innerHTML = `
-    <div class="callout" style="margin-bottom:18px"><h3>统一迁移已经完成</h3><p>${esc(notice.message || '学习数据已经写入统一数据库。')} ${esc(notice.launcher_purpose || '')} 当前有效真实作答 ${num(notice.existing_attempt_count)} 次。</p></div>
-    <div class="channel-grid">${data.channels.map(channel => `<article class="channel"><p class="eyebrow">${esc(channel.channel_key)}</p><h2>${esc(channel.display_name)}</h2><p>${esc(channel.responsibility)}</p><dl class="definition-list"><div><dt>读取</dt><dd>${esc(channel.reads_from)}</dd></div><div><dt>写入</dt><dd>${esc(channel.writes_through)}</dd></div><div><dt>实时上下文</dt><dd class="mono">http://127.0.0.1:8788${esc(channel.context_endpoint)}</dd></div><div><dt>状态</dt><dd>${status(channel.status)}</dd></div></dl><button class="button button-secondary button-small" data-copy="http://127.0.0.1:8788${esc(channel.context_endpoint)}">复制接口</button></article>`).join('')}</div>
-    <section class="panel" style="margin-top:18px"><div class="panel-head"><div><h2>统一工作清单</h2><p>所有对话读取同一状态，不再重复手工写交接</p></div></div><div class="panel-body"><div class="table-wrap"><table><thead><tr><th>领域</th><th>任务</th><th>负责人</th><th>完成量</th><th>状态</th><th>证据</th></tr></thead><tbody>${data.work_items.map(item => `<tr><td>${esc(item.area)}</td><td>${esc(item.title)}</td><td>${esc(item.owner_channel)}</td><td>${num(item.completed_units)} / ${num(item.total_units)} ${esc(item.unit_label)}</td><td>${status(item.status)}</td><td class="mono">${esc(item.evidence_path || '—')}</td></tr>`).join('')}</tbody></table></div></div></section>
-    <div class="callout" style="margin-top:18px"><h3>以后怎么交接</h3><p>另一个对话优先读取自己的实时上下文接口；需要命令细节时再看 HANDOFF_FOR_THREADS.md。课堂和听写结果统一通过 API/JSON 契约写入，不直接改 SQLite。</p></div>`;
+    <section class="relief-hero compact-hero"><div class="relief-copy"><p class="eyebrow">AGENT WORKFLOW</p><h2>不用再手写交接文档</h2><p>${esc(notice.message || '学习数据已经写入统一数据库。')} 三个对话会先读取自己的实时上下文，再执行确定性接口。</p></div><div class="next-action"><span>当前状态</span><strong>${num(notice.existing_attempt_count)} 次有效作答已落库</strong><p>启动器只负责打开网站；数据迁移、解析和工作流已经完成。</p></div></section>
+    <div class="channel-grid">${data.channels.map(channel => `<article class="channel"><div class="automation-status">${status(channel.status)}</div><p class="eyebrow">${esc(channel.channel_key)}</p><h2>${esc(channel.display_name)}</h2><p>${esc(channel.responsibility)}</p><p class="agent-rule">你继续和这个对话说需求，其余由它在后台完成。</p><div class="detail-only"><dl class="definition-list"><div><dt>读取</dt><dd>${esc(channel.reads_from)}</dd></div><div><dt>写入</dt><dd>${esc(channel.writes_through)}</dd></div><div><dt>实时上下文</dt><dd class="mono">http://127.0.0.1:8788${esc(channel.context_endpoint)}</dd></div></dl><button class="button button-secondary button-small" data-copy="http://127.0.0.1:8788${esc(channel.context_endpoint)}">复制接口</button></div></article>`).join('')}</div>
+    <div class="detail-only"><div class="detail-divider"><span>工程审计</span></div><section class="panel"><div class="panel-head"><div><h2>统一工作清单</h2><p>所有对话读取同一状态，不再重复手工写交接</p></div></div><div class="panel-body"><div class="table-wrap"><table><thead><tr><th>领域</th><th>任务</th><th>负责人</th><th>完成量</th><th>状态</th><th>证据</th></tr></thead><tbody>${data.work_items.map(item => `<tr><td>${esc(item.area)}</td><td>${esc(item.title)}</td><td>${esc(item.owner_channel)}</td><td>${num(item.completed_units)} / ${num(item.total_units)} ${esc(item.unit_label)}</td><td>${status(item.status)}</td><td class="mono">${esc(item.evidence_path || '—')}</td></tr>`).join('')}</tbody></table></div></div></section><div class="callout" style="margin-top:18px"><h3>工程约束</h3><p>课堂和听写结果统一通过 API/JSON 契约写入，不直接改 SQLite；模型建议不能自动升级为已核验事实。</p></div></div>`;
 }
 
 async function render(force = false) {
@@ -381,6 +433,13 @@ document.addEventListener('click', async event => {
   if (copy) { await navigator.clipboard.writeText(copy.dataset.copy); notify('接口地址已复制'); }
 });
 document.querySelector('#refresh-button').addEventListener('click', async () => { state.cache = {}; await render(true); });
+detailButton.addEventListener('click', async () => {
+  state.detailMode = !state.detailMode;
+  window.localStorage.setItem('hunan-hub-detail-mode', String(state.detailMode));
+  applyDetailMode();
+  if (state.current === 'overview') await renderOverview();
+  notify(state.detailMode ? '已展开专业数据' : '已返回减负模式');
+});
 document.addEventListener('submit', async event => {
   if (event.target.id === 'question-search') { event.preventDefault(); await searchQuestionRows(); }
   if (event.target.id === 'passage-selector') { event.preventDefault(); await selectCompletePassages(); }
@@ -412,6 +471,7 @@ document.addEventListener('submit', async event => {
 });
 
 async function boot() {
+  applyDetailMode();
   try {
     const health = await api('/api/health');
     document.querySelector('#health-label').textContent = health.status === 'ok' ? '数据已连接' : '需要关注';

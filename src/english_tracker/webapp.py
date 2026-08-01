@@ -16,6 +16,7 @@ from .analytics import due_reviews
 from .backup import create_backup
 from .dashboard import (
     context_for,
+    low_friction_summary,
     overview,
     question_bank_summary,
     question_detail,
@@ -163,6 +164,8 @@ class LearningHubHandler(BaseHTTPRequestHandler):
                 self._send_json(
                     overview(conn, student_id=self.server.student_id, question_bank=self.server.question_bank)
                 )
+            elif path == "/api/home":
+                self._send_json(low_friction_summary(conn, self.server.student_id))
             elif path == "/api/question-bank":
                 self._send_json(question_bank_summary(self.server.question_bank))
             elif path == "/api/questions":

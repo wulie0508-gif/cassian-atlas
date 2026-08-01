@@ -65,6 +65,7 @@ python -m english_tracker serve --host 127.0.0.1 --port 8788 --open-browser
 
 The local-only site visualizes project work, the verified question bank, real classroom performance, evidence-weighted mastery, offline calibration, passage-level reading diagnosis, the source parsing ledger, deterministic dictation, and the three conversation contracts. Its API is the preferred handoff mechanism:
 
+- `/api/home` returns the low-friction status surface: current evidence, automation health, and the smallest next action
 - `/api/context/engineering`, `/api/context/courseware`, `/api/context/dictation`
 - `/api/grammar/questions/{question_id}` and `/api/grammar/passages/{passage_id}/coverage`
 - `/api/grammar/coverage-matrix?passage_id=...` and `POST /api/grammar/select-passages`
@@ -72,6 +73,8 @@ The local-only site visualizes project work, the verified question bank, real cl
 - `/api/performance/sessions`, `/api/reading/passages/{passage_id}/performance`
 - `/api/reading/error-types`, `POST /api/reading/diagnostics`
 - `/api/reports/weekly` and `/api/reports/trends`
+
+The website starts in **low-friction mode**. It answers three questions first: what is happening now, what the user needs to do next, and whether the Agent workflows are healthy. Exact tables, weights, audit evidence, and emergency manual forms remain available behind **查看专业数据**. Routine classroom, reading, test, and dictation records should be written by the responsible Agent; the site is not a second clerical workflow.
 
 ## Full source-library pipeline
 
