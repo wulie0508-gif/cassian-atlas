@@ -121,6 +121,35 @@ def run_quality_checks(conn) -> dict[str, Any]:
         "Downgrade the mapping to suggested and require explicit manual verification.",
     )
     add(
+        "model_diagnostic_verification_guard",
+        "critical",
+        _count(
+            conn,
+            """
+            SELECT COUNT(*) FROM attempt_error_map
+            WHERE error_source='model_suggested'
+              AND verification_status IN ('source_checked','verified')
+              AND record_status='active'
+            """,
+        ),
+        "Model-suggested student error causes are never auto-verified",
+        "Downgrade the diagnosis to suggested and require explicit teacher confirmation.",
+    )
+    add(
+        "correct_attempt_has_no_active_error_cause",
+        "high",
+        _count(
+            conn,
+            """
+            SELECT COUNT(*) FROM attempt_error_map aem
+            JOIN evaluations e ON e.attempt_id=aem.attempt_id AND e.is_current=1
+            WHERE e.result='correct' AND aem.record_status='active'
+            """,
+        ),
+        "Correct attempts do not carry active student error causes",
+        "Void the stale diagnosis or create an audited corrected evaluation before diagnosing.",
+    )
+    add(
         "deep_enrichment_verification_guard",
         "critical",
         _count(

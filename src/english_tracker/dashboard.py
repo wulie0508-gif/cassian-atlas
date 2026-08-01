@@ -189,7 +189,8 @@ def workflow_summary(conn) -> dict[str, Any]:
             "existing_attempt_count": attempt_count,
             "message": "旧错题库和真实作答已经迁入统一数据库；无需点击启动器来触发迁移或解析。",
             "launcher_purpose": "启动器只负责打开本地可视化网站并提供HTTP接口；数据库成果已经落盘。",
-            "offline_data_scope": "当前仅缺少明确分类为正式线下闭卷整卷或双周混合测的校准成绩，不是缺少错题或学习记录。",
+            "performance_definition": "每次课堂、语法填空、阅读、听写和作业的作答都是真实成绩证据。",
+            "offline_data_scope": "当前仅缺少明确分类为正式线下闭卷整卷或双周混合测的高权重校准锚点，不是缺少真实成绩。",
         },
         "channels": channels,
         "work_items": work_items,
@@ -198,8 +199,12 @@ def workflow_summary(conn) -> dict[str, Any]:
 
 def learning_summary(conn, student_id: str) -> dict[str, Any]:
     counts = {
-        table: conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
-        for table in ("learning_sessions", "attempts", "review_tasks", "knowledge_points", "question_enrichments", "question_deep_knowledge_map")
+        "learning_sessions": conn.execute("SELECT COUNT(*) FROM learning_sessions WHERE record_status='active'").fetchone()[0],
+        "attempts": conn.execute("SELECT COUNT(*) FROM attempts WHERE record_status='active'").fetchone()[0],
+        "review_tasks": conn.execute("SELECT COUNT(*) FROM review_tasks WHERE status='open'").fetchone()[0],
+        "knowledge_points": conn.execute("SELECT COUNT(*) FROM knowledge_points WHERE active=1").fetchone()[0],
+        "question_enrichments": conn.execute("SELECT COUNT(*) FROM question_enrichments WHERE verification_status<>'rejected'").fetchone()[0],
+        "question_deep_knowledge_map": conn.execute("SELECT COUNT(*) FROM question_deep_knowledge_map WHERE verification_status<>'rejected'").fetchone()[0],
     }
     due = due_reviews(conn, student_id, limit=20)
     mastery = weighted_mastery_report(conn, student_id)
@@ -245,9 +250,35 @@ def context_for(conn, audience: str, *, student_id: str, question_bank: str | Pa
             "coverage_matrix": "/api/grammar/coverage-matrix?passage_id={passage_id}",
             "select_complete_passages": "/api/grammar/select-passages",
             "record_classroom_attempts": "/api/classroom/attempts",
+            "session_performance": "/api/performance/sessions?domain={optional_domain}",
+            "reading_passage_performance": "/api/reading/passages/{passage_id}/performance?session_id={optional_session_id}",
+            "reading_error_taxonomy": "/api/reading/error-types",
+            "record_reading_diagnostics": "/api/reading/diagnostics",
             "weekly_report": "/api/reports/weekly",
             "trend_report": "/api/reports/trends",
         }
+        result["agent_trigger_rules"] = [
+            {
+                "when": "完成一次课堂、语法填空、阅读、听写或其他练习后",
+                "action": "调用 record_classroom_attempts 写入逐题作答；这些就是真实成绩，不要等线下测试。",
+            },
+            {
+                "when": "阅读题作答完成或需要复盘时",
+                "action": "先调用 reading_passage_performance 读取整篇考点、得分和已有错因；有原始答案时才可提交错因。",
+            },
+            {
+                "when": "Agent 自动分析出阅读错因时",
+                "action": "使用 record_reading_diagnostics，error_source=model_suggested 且 verification_status=suggested；不得自动升级。",
+            },
+            {
+                "when": "answer_capture_status=not_captured",
+                "action": "仅保留对错和样本证据，不根据标准答案反推学生错因。",
+            },
+            {
+                "when": "生成课件、复习计划或选题前",
+                "action": "先读 session_performance、weekly_report 和知识点掌握；重复统计不再由模型现算。",
+            },
+        ]
         if audience == "dictation":
             result["web_endpoints"].update(
                 {

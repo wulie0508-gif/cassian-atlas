@@ -198,6 +198,12 @@ tbody tr:hover { background: #f8faf8; }
 .selection-card > span { display: grid; place-items: center; width: 28px; height: 28px; color: #fff; background: var(--green); font-family: Georgia, serif; }
 .selection-card strong, .selection-card small { display: block; }
 .selection-card p { margin: 5px 0 0; color: var(--ink-soft); font-size: 11px; }
+.metric-strip.compact { margin-top: 14px; box-shadow: none; }
+.diagnostic-list { display: grid; gap: 9px; margin-top: 18px; }
+.diagnostic-list h3 { margin: 0 0 2px; font-size: 14px; }
+.diagnostic-form { display: grid; grid-template-columns: minmax(150px,.75fr) minmax(180px,.9fr) minmax(260px,1.6fr) auto; gap: 8px; align-items: end; padding: 10px; border: 1px solid var(--line); background: var(--surface-soft); }
+.diagnostic-form strong, .diagnostic-form small { display: block; }
+.diagnostic-form small { color: var(--ink-soft); }
 
 .empty-state, .error-state { padding: 42px 20px; text-align: center; color: var(--ink-soft); }
 .error-state { color: var(--red); }
@@ -218,6 +224,7 @@ tbody tr:hover { background: #f8faf8; }
   .dashboard-grid { grid-template-columns: 1fr; }
   .channel-grid { grid-template-columns: 1fr; }
   .check-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .diagnostic-form { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 760px) {
   :root { --sidebar: 0px; }
@@ -239,4 +246,5 @@ tbody tr:hover { background: #f8faf8; }
   .form-grid .span-2 { grid-column: auto; }
   .bar-row { grid-template-columns: 92px 1fr 38px; }
   .check-grid { grid-template-columns: 1fr; }
+  .diagnostic-form { grid-template-columns: 1fr; }
 }

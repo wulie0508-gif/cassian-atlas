@@ -10,7 +10,7 @@ const titles = {
   overview: ['项目总览', 'PROJECT CONTROL'],
   'question-bank': ['题库与知识', 'QUESTION LIBRARY'],
   mastery: ['学情掌握', 'LEARNING EVIDENCE'],
-  assessments: ['测试校准', 'ASSESSMENT CALIBRATION'],
+  assessments: ['课堂成绩', 'CLASSROOM PERFORMANCE'],
   library: ['解析中心', 'PARSING PIPELINE'],
   dictation: ['单词听写', 'DICTATION AUTOMATION'],
   workflow: ['三个对话', 'WORKFLOW CONTRACTS'],
@@ -75,7 +75,7 @@ async function renderOverview(force = false) {
     return `<div class="progress-item"><div class="progress-top"><strong>${esc(item.title)}</strong>${status(item.status)}</div><div class="progress-track"><span class="${item.status === 'completed' ? '' : 'pending'}" style="--progress:${(progress * 100).toFixed(1)}%"></span></div><small class="subtle">${num(item.completed_units)} / ${num(item.total_units)} ${esc(item.unit_label)}</small></div>`;
   }).join('');
   const calibrationBody = calibration == null
-    ? `<div class="callout amber"><h3>线下校准还缺真实成绩</h3><p>权重模型已启用，但当前没有正式线下闭卷整卷或双周混合测。录入第一份成绩后，系统会显示“线下校准准确率 − 日常练习准确率”的差值。</p></div>`
+    ? `<div class="callout amber"><h3>高权重校准锚点待补充</h3><p>现有课堂与平时作答已经是真实成绩。当前只缺正式线下闭卷整卷或双周混合测，用于校准平时训练是否能迁移到受控环境。</p></div>`
     : `<div class="split-stat"><div><small>线下校准</small><strong>${pct(calibration, 1)}</strong></div><div><small>日常练习</small><strong>${pct(practice, 1)}</strong></div></div><p class="subtle">差值 ${pct(mastery.summary.calibration_gap, 1)}；正值表示受控环境表现更好。</p>`;
   view.innerHTML = `
     <section class="metric-strip">
@@ -208,11 +208,25 @@ async function renderMastery() {
 }
 
 async function renderAssessments() {
-  const [records, weights] = await Promise.all([api('/api/assessments'), api('/api/weights')]);
+  const [records, weights, performance] = await Promise.all([api('/api/assessments'), api('/api/weights'), api('/api/performance/sessions?limit=100')]);
+  const sessions = performance.items || [];
+  const totalScore = sessions.reduce((sum,row) => sum + Number(row.derived_score || 0), 0);
+  const totalMaximum = sessions.reduce((sum,row) => sum + Number(row.derived_max_score || 0), 0);
+  const totalAttempts = sessions.reduce((sum,row) => sum + Number(row.attempt_count || 0), 0);
+  const anchors = sessions.filter(row => row.is_calibration_anchor).length;
   view.innerHTML = `
+    <section class="metric-strip">
+      ${metric('成绩课次', num(sessions.length), '每次有逐题作答的课都计入')}
+      ${metric('真实作答', num(totalAttempts), '课堂、作业、听写与测试')}
+      ${metric('描述正确率', pct(totalMaximum ? totalScore / totalMaximum : null, 1), `${num(totalScore)} / ${num(totalMaximum)}`)}
+      ${metric('校准锚点', num(anchors), '线下闭卷整卷/混合测')}
+      ${metric('阅读诊断', '按篇追踪', '考点与学生错因分开')}
+    </section>
     <div class="dashboard-grid">
       <div class="stack">
-        ${panel('录入一次测试', '周测、月测和正式线下整卷都写入同一数据库', `<form id="assessment-form"><div class="form-grid">
+        ${panel('真实课堂成绩', '从逐题作答自动汇总；即使未单独录入一张试卷总分，成绩也不会丢失', `<div class="table-wrap"><table><thead><tr><th>日期</th><th>课次</th><th>范围</th><th>作答</th><th>对/错</th><th>正确率</th><th>证据</th></tr></thead><tbody>${sessions.map(row => `<tr><td>${esc(String(row.started_at).slice(0,10))}</td><td><strong>${esc(row.title)}</strong><br><small class="mono">${esc(row.session_id)}</small></td><td>${(row.domains || []).map(d => `${esc(d.domain)} ${num(d.attempt_count)}`).join('<br>')}</td><td>${num(row.derived_score)} / ${num(row.derived_max_score)}</td><td>${num(row.correct_count)} / ${num(row.wrong_count + row.partial_count)}</td><td>${pct(row.accuracy,1)}</td><td>${row.is_calibration_anchor ? '<span class="status-tag verified">校准锚点</span>' : '<span class="status-tag">日常真实成绩</span>'}</td></tr>`).join('') || '<tr><td colspan="7">尚无作答记录</td></tr>'}</tbody></table></div>`)}
+        ${panel('阅读整篇诊断', '输入 passage_id，查看本篇考什么、错几题、为什么错和同类题', `<form id="reading-performance-search" class="toolbar"><div class="field grow"><label for="reading-passage-id">文章 passage_id</label><input id="reading-passage-id" name="passage_id" required placeholder="PAS-..."></div><div class="field grow"><label for="reading-session-id">限定课次（可选）</label><input id="reading-session-id" name="session_id" placeholder="SES-..."></div><button class="button" type="submit">生成诊断</button></form><div id="reading-performance-results"><p class="subtle">题目知识点表示“考什么”；作答错因表示“学生为什么错”，两者不混用。</p></div>`)}
+        ${panel('补录高权重校准', '只用于双周线下混合测、月测和正式整卷；不会覆盖日常课堂成绩', `<form id="assessment-form"><div class="form-grid">
           <div class="field span-2"><label for="test-title">名称</label><input id="test-title" name="title" required placeholder="例如：8月第一周语法专题测"></div>
           <div class="field"><label for="test-date">日期</label><input id="test-date" name="date" type="date" required></div>
           <div class="field"><label for="assessment-kind">类型</label><select id="assessment-kind" name="assessment_kind"><option value="topic_quiz">专题小测</option><option value="biweekly_mixed_test">双周混合测</option><option value="full_exam">正式整卷</option><option value="dictation">听写</option><option value="lesson">课堂练习</option><option value="homework">作业</option></select></div>
@@ -223,7 +237,7 @@ async function renderAssessments() {
           <div class="field"><label for="duration">用时（秒）</label><input id="duration" name="duration_seconds" type="number" min="0"></div>
           <div class="field"><label for="blank-count">空白数</label><input id="blank-count" name="blank_count" type="number" min="0"></div>
         </div><div class="form-actions"><button class="button" type="submit">保存测试</button></div></form>`)}
-        ${panel('测试记录', '不同满分、类型和系列不会连成一条原始分曲线', `<div class="table-wrap"><table><thead><tr><th>日期</th><th>测试</th><th>类型</th><th>环境</th><th>成绩</th><th>权重</th></tr></thead><tbody>${records.items.map(row => `<tr><td>${esc(String(row.started_at).slice(0,10))}</td><td>${esc(row.title)}</td><td>${esc(row.assessment_kind)}</td><td>${esc(row.delivery_mode)}</td><td>${row.raw_score == null ? '—' : `${num(row.raw_score)} / ${num(row.max_score)}`}</td><td>${num(row.evidence_weight)}</td></tr>`).join('') || '<tr><td colspan="6">尚无分类测试记录</td></tr>'}</tbody></table></div>`)}
+        ${panel('校准锚点记录', '不同满分、类型和系列不会连成一条原始分曲线', `<div class="table-wrap"><table><thead><tr><th>日期</th><th>测试</th><th>类型</th><th>环境</th><th>成绩</th><th>权重</th></tr></thead><tbody>${records.items.map(row => `<tr><td>${esc(String(row.started_at).slice(0,10))}</td><td>${esc(row.title)}</td><td>${esc(row.assessment_kind)}</td><td>${esc(row.delivery_mode)}</td><td>${row.raw_score == null ? '—' : `${num(row.raw_score)} / ${num(row.max_score)}`}</td><td>${num(row.evidence_weight)}</td></tr>`).join('') || '<tr><td colspan="6">尚无单独分类的高权重校准记录；上方课堂成绩仍然有效。</td></tr>'}</tbody></table></div>`)}
       </div>
       <div class="stack">
         ${panel('证据权重', weights.policy_version, barList(weights.assessment_policies.filter(row => row.delivery_mode === 'offline_closed'), {label:'assessment_kind', value:'evidence_weight', max: 1.6, format: v => v.toFixed(2)}))}
@@ -231,6 +245,35 @@ async function renderAssessments() {
       </div>
     </div>`;
   document.querySelector('#test-date').value = new Date().toISOString().slice(0,10);
+}
+
+async function loadReadingPerformance() {
+  const form = document.querySelector('#reading-performance-search');
+  const host = document.querySelector('#reading-performance-results');
+  if (!form || !host) return;
+  const data = new FormData(form);
+  const passageId = String(data.get('passage_id') || '').trim();
+  const sessionId = String(data.get('session_id') || '').trim();
+  const query = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : '';
+  host.innerHTML = '<div class="empty-state">正在读取逐题证据…</div>';
+  try {
+    const result = await api(`/api/reading/passages/${encodeURIComponent(passageId)}/performance${query}`);
+    state.readingPerformance = {passageId, sessionId};
+    const s = result.summary;
+    const questionRows = result.questions.map(row => {
+      const points = (row.knowledge_points || []).map(k => k.name_cn || k.code).join('、') || row.primary_test_point || '待标注';
+      const attempts = (row.attempts || []).map(a => {
+        const causes = (a.error_causes || []).map(c => `${esc(c.label_cn)} ${status(c.verification_status)}`).join('<br>');
+        const diagnosis = a.diagnostic_status === 'blocked_not_captured' ? '原始答案未保存，禁止反推错因' : (a.diagnostic_status === 'pending_diagnosis' ? '待诊断' : causes || '—');
+        return `<div><strong>${esc(a.result)}</strong> · ${esc(a.student_answer ?? (a.answer_capture_status === 'not_captured' ? '未保存' : '空白'))}<br><small>${diagnosis}</small></div>`;
+      }).join('') || '未作答';
+      return `<tr><td>${esc(row.original_number || row.question_id)}<br><small class="mono">${esc(row.question_id)}</small></td><td>${esc(points)}</td><td>${attempts}</td><td>${esc(row.answer || '—')}</td></tr>`;
+    }).join('');
+    const pending = result.questions.flatMap(row => (row.attempts || []).filter(a => a.diagnostic_status === 'pending_diagnosis').map(a => ({...a, question_id: row.question_id})));
+    const taxonomy = (result.allowed_error_types || []).filter(row => row.code !== 'reading_error');
+    const diagnostics = pending.map(a => `<form class="diagnostic-form" data-attempt-id="${esc(a.attempt_id)}"><div><strong>${esc(a.question_id)}</strong><small>学生答案：${esc(a.student_answer || '空白')}</small></div><select name="code" aria-label="阅读错因">${taxonomy.map(t => `<option value="${esc(t.code)}">${esc(t.label_cn)}</option>`).join('')}</select><input name="rationale" required placeholder="请写证据：题干、选项与原文如何显示该错因"><button class="button button-small" type="submit">确认错因</button></form>`).join('');
+    host.innerHTML = `<section class="metric-strip compact"><div class="metric"><span class="metric-label">题数</span><strong class="metric-value">${num(s.question_count)}</strong></div><div class="metric"><span class="metric-label">已作答</span><strong class="metric-value">${num(s.attempted_question_count)}</strong></div><div class="metric"><span class="metric-label">正确 / 错误</span><strong class="metric-value">${num(s.correct_count)} / ${num(s.wrong_count + s.partial_count)}</strong></div><div class="metric"><span class="metric-label">正确率</span><strong class="metric-value">${pct(s.accuracy,1)}</strong></div><div class="metric"><span class="metric-label">待诊断</span><strong class="metric-value">${num(s.pending_diagnosis_count)}</strong></div></section><div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>题目</th><th>考查内容</th><th>作答与错因</th><th>标准答案</th></tr></thead><tbody>${questionRows}</tbody></table></div>${diagnostics ? `<div class="diagnostic-list"><h3>人工确认错因</h3>${diagnostics}</div>` : ''}<div class="selection-summary"><h3>同考点练习</h3>${(result.similar_questions || []).map(q => `<article class="selection-card"><span>→</span><div><strong>${esc(q.primary_test_point || q.question_type)}</strong><small class="mono">${esc(q.question_id)} · ${esc(q.passage_id)}</small><p>${esc(q.stem || '请打开题目详情')}</p></div></article>`).join('') || '<p class="subtle">当前没有可推荐的同考点已核验题。</p>'}</div>`;
+  } catch (error) { host.innerHTML = `<div class="error-state">${esc(error.message)}</div>`; }
 }
 
 async function renderLibrary() {
@@ -342,6 +385,15 @@ document.addEventListener('submit', async event => {
   if (event.target.id === 'question-search') { event.preventDefault(); await searchQuestionRows(); }
   if (event.target.id === 'passage-selector') { event.preventDefault(); await selectCompletePassages(); }
   if (event.target.id === 'library-search') { event.preventDefault(); await searchLibraryMaterials(); }
+  if (event.target.id === 'reading-performance-search') { event.preventDefault(); await loadReadingPerformance(); }
+  if (event.target.classList.contains('diagnostic-form')) {
+    event.preventDefault();
+    const data = new FormData(event.target);
+    const eventId = `EVT-WEB-${crypto.randomUUID()}`;
+    const body = {event_id:eventId,idempotency_key:`web:reading-diagnostic:${eventId}:v1`,source_thread:'manual',diagnostics:[{attempt_id:event.target.dataset.attemptId,error_types:[{code:data.get('code'),confidence:1,error_source:'teacher_observation',verification_status:'verified',rationale:data.get('rationale')}]}]};
+    try { await api('/api/reading/diagnostics', {method:'POST', body:JSON.stringify(body)}); notify('阅读错因已确认并留存审计记录'); await loadReadingPerformance(); }
+    catch (error) { notify(error.message, true); }
+  }
   if (event.target.id === 'assessment-form') {
     event.preventDefault();
     const body = Object.fromEntries(new FormData(event.target));

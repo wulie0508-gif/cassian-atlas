@@ -12,6 +12,8 @@ RESULTS = {"correct", "partial", "wrong", "needs_check"}
 CAPTURE_STATUSES = {"captured", "captured_blank", "not_captured", "unknown_legacy"}
 ASSESSMENT_KINDS = {"lesson", "topic_quiz", "biweekly_mixed_test", "full_exam", "dictation", "homework", "other"}
 DELIVERY_MODES = {"offline_closed", "offline_open", "online", "home", "unspecified"}
+ERROR_SOURCES = {"student_answer", "teacher_observation", "manual", "legacy", "rule", "model_suggested"}
+ERROR_VERIFICATION_STATUSES = {"suggested", "source_checked", "verified", "needs_check", "rejected", "unverified"}
 
 
 def _require_object(payload: Any, label: str) -> dict:
@@ -93,4 +95,35 @@ def validate_progress_payload(payload: Any) -> dict:
     _required(obj, ["session_id", "progress"], "payload")
     if not isinstance(obj["progress"], list) or not obj["progress"]:
         raise ContractError("progress must be a non-empty array")
+    return obj
+
+
+def validate_diagnostics_payload(payload: Any) -> dict:
+    obj = validate_envelope(payload)
+    diagnostics = obj.get("diagnostics")
+    if not isinstance(diagnostics, list) or not diagnostics:
+        raise ContractError("diagnostics must be a non-empty array")
+    for index, diagnostic in enumerate(diagnostics):
+        diagnostic = _require_object(diagnostic, f"diagnostics[{index}]")
+        _required(diagnostic, ["attempt_id", "error_types"], f"diagnostics[{index}]")
+        errors = diagnostic["error_types"]
+        if not isinstance(errors, list) or not errors:
+            raise ContractError(f"diagnostics[{index}].error_types must be a non-empty array")
+        for error_index, error in enumerate(errors):
+            error = _require_object(error, f"diagnostics[{index}].error_types[{error_index}]")
+            if not error.get("code") and not error.get("raw_error_type"):
+                raise ContractError("Every diagnostic error requires code or raw_error_type")
+            if not str(error.get("rationale") or "").strip():
+                raise ContractError("Every diagnostic error requires an evidence-based rationale")
+            source = error.get("error_source", "model_suggested")
+            verification = error.get("verification_status", "suggested" if source == "model_suggested" else "unverified")
+            if source not in ERROR_SOURCES:
+                raise ContractError(f"invalid error_source: {source}")
+            if verification not in ERROR_VERIFICATION_STATUSES:
+                raise ContractError(f"invalid diagnostic verification_status: {verification}")
+            confidence = float(error.get("confidence", 1.0))
+            if not 0 <= confidence <= 1:
+                raise ContractError("diagnostic confidence must be between zero and one")
+            if source == "model_suggested" and verification != "suggested":
+                raise ContractError("model_suggested diagnostics must remain suggested")
     return obj

@@ -4,7 +4,12 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from .contracts import validate_attempts_payload, validate_progress_payload, validate_session_payload
+from .contracts import (
+    validate_attempts_payload,
+    validate_diagnostics_payload,
+    validate_progress_payload,
+    validate_session_payload,
+)
 from .util import canonical_json, normalize_alias, payload_hash, random_id, stable_id, utc_now
 
 
@@ -637,6 +642,143 @@ def import_attempts(conn, payload: dict, *, backup_path: str | None = None) -> d
         "event_id": ingest_event_id,
         "attempts_inserted": inserted_attempts,
         "content_items_inserted": inserted_items,
+    }
+
+
+def import_attempt_diagnostics(conn, payload: dict, *, backup_path: str | None = None) -> dict[str, Any]:
+    """Attach evidence-backed error causes without changing the original attempt."""
+    payload = validate_diagnostics_payload(payload)
+    ingest_event_id = payload["event_id"]
+    inserted = 0
+    updated = 0
+    skipped = 0
+    with conn:
+        created, existing = _begin_event(conn, payload, "attempt_diagnostics", backup_path)
+        if not created:
+            return {"status": "duplicate", "event_id": ingest_event_id, "existing": existing}
+        _require_student(conn, payload["student_id"])
+        now = utc_now()
+        for diagnostic in payload["diagnostics"]:
+            attempt = conn.execute(
+                """
+                SELECT a.attempt_id,a.answer_capture_status,e.result
+                FROM attempts a
+                JOIN evaluations e ON e.attempt_id=a.attempt_id AND e.is_current=1
+                WHERE a.attempt_id=? AND a.student_id=? AND a.record_status='active'
+                """,
+                (diagnostic["attempt_id"], payload["student_id"]),
+            ).fetchone()
+            if not attempt:
+                raise IngestConflict(f"Unknown active attempt for student: {diagnostic['attempt_id']}")
+            if attempt["answer_capture_status"] == "not_captured":
+                raise IngestConflict(
+                    f"Attempt {attempt['attempt_id']} has answer_capture_status=not_captured; "
+                    "specific error causes cannot be inferred"
+                )
+            if attempt["result"] not in {"wrong", "partial", "needs_check"}:
+                raise IngestConflict(f"Attempt {attempt['attempt_id']} is correct; an error cause cannot be attached")
+            for error in diagnostic["error_types"]:
+                error_type_id, raw, confidence, note = _resolve_error_type(conn, error)
+                raw = raw or error.get("code") or "needs_check"
+                source = error.get("error_source", "model_suggested")
+                verification = error.get("verification_status", "suggested" if source == "model_suggested" else "unverified")
+                existing_row = conn.execute(
+                    """
+                    SELECT * FROM attempt_error_map
+                    WHERE attempt_id=? AND error_type_id=? AND COALESCE(raw_error_type,'')=?
+                    ORDER BY CASE record_status WHEN 'active' THEN 0 ELSE 1 END LIMIT 1
+                    """,
+                    (attempt["attempt_id"], error_type_id, raw),
+                ).fetchone()
+                if existing_row and (
+                    (existing_row["verification_status"] in {"verified", "source_checked"} and verification not in {"verified", "source_checked"})
+                    or (existing_row["error_source"] in {"manual", "teacher_observation"} and source == "model_suggested")
+                ):
+                    skipped += 1
+                    continue
+                values = (
+                    confidence,
+                    note,
+                    source,
+                    verification,
+                    error["rationale"],
+                    attempt["attempt_id"],
+                    error_type_id,
+                    raw,
+                )
+                if existing_row:
+                    before = dict(existing_row)
+                    conn.execute(
+                        """
+                        UPDATE attempt_error_map
+                        SET confidence=?,note=?,error_source=?,verification_status=?,rationale=?,
+                            record_status='active',invalidation_reason=NULL
+                        WHERE attempt_id=? AND error_type_id=? AND COALESCE(raw_error_type,'')=?
+                        """,
+                        values,
+                    )
+                    action = "update"
+                    updated += 1
+                else:
+                    before = None
+                    conn.execute(
+                        """
+                        INSERT INTO attempt_error_map(
+                          attempt_id,error_type_id,raw_error_type,confidence,note,
+                          error_source,verification_status,rationale,record_status
+                        ) VALUES (?,?,?,?,?,?,?,?,'active')
+                        """,
+                        (
+                            attempt["attempt_id"],
+                            error_type_id,
+                            raw,
+                            confidence,
+                            note,
+                            source,
+                            verification,
+                            error["rationale"],
+                        ),
+                    )
+                    action = "insert"
+                    inserted += 1
+                after = dict(
+                    conn.execute(
+                        """
+                        SELECT * FROM attempt_error_map
+                        WHERE attempt_id=? AND error_type_id=? AND COALESCE(raw_error_type,'')=?
+                        """,
+                        (attempt["attempt_id"], error_type_id, raw),
+                    ).fetchone()
+                )
+                mapping_id = stable_id("DIAG", attempt["attempt_id"], error_type_id, raw)
+                _record_event_row(conn, ingest_event_id, "attempt_error_map", mapping_id, "insert" if action == "insert" else "link", after)
+                conn.execute(
+                    """
+                    INSERT INTO audit_log(
+                      audit_id,occurred_at,actor,action,entity_type,entity_id,
+                      ingest_event_id,before_json,after_json,reason
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        random_id("AUD"),
+                        now,
+                        payload["source_thread"],
+                        f"diagnostic_{action}",
+                        "attempt_error_map",
+                        mapping_id,
+                        ingest_event_id,
+                        canonical_json(before) if before is not None else None,
+                        canonical_json(after),
+                        error["rationale"],
+                    ),
+                )
+        _finish_event(conn, ingest_event_id, sum(len(row["error_types"]) for row in payload["diagnostics"]), inserted + updated, skipped)
+    return {
+        "status": "applied",
+        "event_id": ingest_event_id,
+        "diagnostics_inserted": inserted,
+        "diagnostics_updated": updated,
+        "diagnostics_skipped": skipped,
     }
 
 

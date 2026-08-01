@@ -63,12 +63,14 @@ $env:ENGLISH_TRACKER_LIBRARY_ROOT = 'C:\path\to\source-library'
 python -m english_tracker serve --host 127.0.0.1 --port 8788 --open-browser
 ```
 
-The local-only site visualizes project work, the verified question bank, evidence-weighted mastery, offline calibration, the source parsing ledger, deterministic dictation, and the three conversation contracts. Its API is the preferred handoff mechanism:
+The local-only site visualizes project work, the verified question bank, real classroom performance, evidence-weighted mastery, offline calibration, passage-level reading diagnosis, the source parsing ledger, deterministic dictation, and the three conversation contracts. Its API is the preferred handoff mechanism:
 
 - `/api/context/engineering`, `/api/context/courseware`, `/api/context/dictation`
 - `/api/grammar/questions/{question_id}` and `/api/grammar/passages/{passage_id}/coverage`
 - `/api/grammar/coverage-matrix?passage_id=...` and `POST /api/grammar/select-passages`
 - `POST /api/classroom/attempts`, `POST /api/dictation/results`
+- `/api/performance/sessions`, `/api/reading/passages/{passage_id}/performance`
+- `/api/reading/error-types`, `POST /api/reading/diagnostics`
 - `/api/reports/weekly` and `/api/reports/trends`
 
 ## Full source-library pipeline
@@ -94,6 +96,7 @@ python -m english_tracker library structure-summary --output structure-summary.j
 - `schemas/session-import.schema.json`
 - `schemas/attempts-import.schema.json`
 - `schemas/progress-import.schema.json`
+- `schemas/reading-diagnostics.schema.json`
 - Anonymous examples in `examples/`
 
 The runtime performs high-value contract checks without adding a third-party dependency. Producers should also validate against the published JSON Schemas in their own pipeline.
@@ -114,6 +117,10 @@ The score combines error rate, sample size, recency, consecutive errors, latest 
 The source-checked grammar catalog is versioned by source SHA-256. A hierarchical knowledge tree supports primary, secondary, prerequisite, and trap mappings. Passage selection uses weighted greedy set-cover over complete source-checked passages and incorporates recent wrong/partial evidence without splitting passages.
 
 Weekly reports include topic accuracy, measured duration, blank rate, not-captured count, retest recovery, and knowledge-point accuracy with sample size. Trend exports partition raw scores by assessment kind, reporting series, and maximum score, so unlike totals are never connected. Schedule checks cover biweekly closed mixed tests, four-week full papers, and the December-onward weekly full-paper target.
+
+Every active item attempt with a current evaluation is real performance evidence, including ordinary classroom practice, reading, grammar cloze, dictation and homework. Offline closed mixed tests and full papers receive higher evidence weights because they calibrate transfer under controlled conditions; they are not the only records counted as scores.
+
+Reading reports aggregate a complete passage without breaking it into isolated questions. They keep source-backed test points separate from attempt-specific error causes, expose missing diagnoses, block cause inference for `not_captured`, and return verified same-test-point practice. Model-created diagnoses remain `suggested` until a teacher explicitly confirms them.
 
 The first scheduler is deliberately conservative (`simple-v1`). Historical FSRS state is preserved during migration, but this project does not claim FSRS compatibility until a versioned adapter is implemented and validated.
 

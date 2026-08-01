@@ -31,6 +31,9 @@ The responses contain current weaknesses, due reviews, project status, question-
 | Source-material RAG search | `GET /api/library/search?q=...` |
 | Staged full-library candidates | `GET /api/library/candidates?q=...` |
 | Batch classroom attempts | `POST /api/classroom/attempts` |
+| Classroom scores summarized from attempts | `GET /api/performance/sessions?domain=reading` |
+| One reading passage: score, test points, causes, similar items | `GET /api/reading/passages/{passage_id}/performance?session_id={optional}` |
+| Reading error taxonomy and audited diagnosis | `GET /api/reading/error-types`, `POST /api/reading/diagnostics` |
 | Weekly and trend data | `GET /api/reports/weekly`, `GET /api/reports/trends?start=YYYY-MM-DD&end=YYYY-MM-DD` |
 | Dictation queue, OCR contract and results | `GET /api/dictation/plan`, `GET /api/contracts/dictation-ocr`, `POST /api/dictation/results` |
 
@@ -164,6 +167,8 @@ This is weighted greedy set-cover. Explicit targets start with the same base wei
 
 Create the session first, then send one attempts batch. For a new question-bank item, include a minimal item snapshot and a question reference:
 
+Every active attempt with a current evaluation is real performance evidence. Classroom practice, grammar cloze, reading, dictation and homework do not need an offline-test label to count as scores. A formal offline closed mixed test or full paper is a higher-weight calibration anchor; it is not the definition of a real score.
+
 ```powershell
 python -m english_tracker session import --input classroom-session.json
 python -m english_tracker attempts import --input classroom-attempts.json
@@ -218,7 +223,7 @@ Replace the placeholder with JSON objects (not a quoted string). The following i
 
 The example deliberately has no `error_types`: because the original response was not captured, the system may store the known `wrong` result but must not infer a specific cause from the standard answer. Question knowledge mappings and student error-cause mappings are separate tables and separate evidence claims.
 
-For a scored activity, classify the session when it is created:
+When a total score, duration, environment or reporting series is also known, classify the session when it is created. This adds test metadata; it does not make the underlying attempts more or less real:
 
 ```json
 {
@@ -248,6 +253,49 @@ For a scored activity, classify the session when it is created:
 Use `assessment_kind=biweekly_mixed_test` for the two-week closed mixed test and `assessment_kind=full_exam` for a formal full paper. Do not label an ordinary lesson as a formal exam.
 
 Record broad classroom feedback in the session payload's `observations`; do not create fake item attempts.
+
+## Courseware conversation: analyze one reading passage
+
+Request the full passage result rather than recomputing one question at a time:
+
+```powershell
+Invoke-RestMethod 'http://127.0.0.1:8788/api/reading/passages/PAS-EXAMPLE-001/performance'
+```
+
+Add `?session_id=SES-COURSE-001` when the analysis must be limited to one class. The response includes:
+
+- passage question count, attempted question count, correct, partial and wrong counts, blank count and accuracy;
+- source test points and normalized knowledge mappings for each question;
+- every captured student answer and its current evaluation;
+- stored error causes with source, confidence and verification status;
+- `pending_diagnosis` when an incorrect captured answer still needs analysis;
+- `blocked_not_captured` when a specific cause is forbidden;
+- verified same-primary-test-point questions from other passages.
+
+Question knowledge and attempt error causes are different claims. A question can test inference while the student's actual cause is a stem misread or distractor trap; do not copy the test-point label into the error-cause field without evidence.
+
+To save an agent suggestion, post an idempotent event:
+
+```json
+{
+  "event_id": "EVT-READ-DIAG-001",
+  "idempotency_key": "courseware:read-diag:001:v1",
+  "source_thread": "courseware",
+  "student_id": "STU-001",
+  "diagnostics": [{
+    "attempt_id": "ATT-EXAMPLE-001",
+    "error_types": [{
+      "code": "reading_inference_overreach",
+      "confidence": 0.82,
+      "error_source": "model_suggested",
+      "verification_status": "suggested",
+      "rationale": "The selected option adds a conclusion not supported by the located passage evidence."
+    }]
+  }]
+}
+```
+
+Send it to `POST /api/reading/diagnostics`. Model-created diagnoses cannot be promoted beyond `suggested`. The local website can record an explicit teacher confirmation as verified. The endpoint rejects a specific diagnosis when the original answer was not captured.
 
 ## Courseware conversation: record progress only
 

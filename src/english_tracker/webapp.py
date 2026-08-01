@@ -25,7 +25,7 @@ from .dashboard import (
 from .db import connect, database_path, require_initialized
 from .enrichment import search_knowledge
 from .grammar_catalog import coverage_matrix, passage_coverage, question_knowledge
-from .ingest import import_attempts, import_session
+from .ingest import import_attempt_diagnostics, import_attempts, import_session
 from .library import library_summary, recent_resources
 from .metrics import trend_report, weekly_report
 from .question_pipeline import (
@@ -34,6 +34,7 @@ from .question_pipeline import (
     staged_question_detail,
     structure_summary,
 )
+from .performance import reading_error_taxonomy, reading_passage_performance, session_performance
 from .selection import weighted_set_cover
 from .util import random_id, utc_now
 from .weights import weight_policy_report, weighted_mastery_report
@@ -200,6 +201,31 @@ class LearningHubHandler(BaseHTTPRequestHandler):
                     )
                 ]
                 self._send_json({"count": len(rows), "items": rows})
+            elif path == "/api/performance/sessions":
+                self._send_json(
+                    session_performance(
+                        conn,
+                        self.server.student_id,
+                        domain=query.get("domain", [None])[0],
+                        limit=int(query.get("limit", ["100"])[0]),
+                    )
+                )
+            elif path == "/api/reading/error-types":
+                self._send_json({"items": reading_error_taxonomy(conn)})
+            elif path.startswith("/api/reading/passages/") and path.endswith("/performance"):
+                passage_id = path.removeprefix("/api/reading/passages/").removesuffix("/performance").strip("/")
+                if not passage_id:
+                    raise ValueError("passage_id is required")
+                self._send_json(
+                    reading_passage_performance(
+                        conn,
+                        self.server.question_bank,
+                        self.server.student_id,
+                        passage_id,
+                        session_id=query.get("session_id", [None])[0],
+                        similar_limit=int(query.get("similar_limit", ["12"])[0]),
+                    )
+                )
             elif path == "/api/library":
                 self._send_json(library_summary(conn))
             elif path == "/api/library/resources":
@@ -355,6 +381,15 @@ class LearningHubHandler(BaseHTTPRequestHandler):
                 payload.setdefault("student_id", self.server.student_id)
                 backup = create_backup(self.server.db_path, self.server.data_dir / "backups", "web-classroom-attempts")
                 result = import_attempts(conn, payload, backup_path=str(backup) if backup else None)
+                self._send_json({"status": "created", "result": result}, 201)
+            elif path == "/api/reading/diagnostics":
+                payload = dict(body)
+                payload.setdefault("event_id", random_id("EVT"))
+                payload.setdefault("idempotency_key", f"web:reading-diagnostics:{payload['event_id']}:v1")
+                payload.setdefault("source_thread", "courseware")
+                payload.setdefault("student_id", self.server.student_id)
+                backup = create_backup(self.server.db_path, self.server.data_dir / "backups", "web-reading-diagnostics")
+                result = import_attempt_diagnostics(conn, payload, backup_path=str(backup) if backup else None)
                 self._send_json({"status": "created", "result": result}, 201)
             elif path == "/api/dictation/results":
                 items = body.get("items")
