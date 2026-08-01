@@ -1,0 +1,32 @@
+{
+  "event_id": "EVT-DEMO-ATTEMPTS-001",
+  "idempotency_key": "demo:attempts:001",
+  "source_thread": "dictation",
+  "student_id": "STU-001",
+  "session_id": "SES-DEMO-001",
+  "attempts": [
+    {
+      "event_id": "ATT-EVT-DEMO-001",
+      "attempted_at": "2026-01-15T09:05:00+08:00",
+      "student_answer": "enviroment",
+      "standard_answer": "environment",
+      "answer_capture_status": "captured",
+      "response_mode": "active_recall",
+      "evaluation": {"result": "wrong", "score": 0, "max_score": 1, "evaluated_by": "teacher"},
+      "error_types": ["spelling"],
+      "item": {
+        "domain": "vocabulary",
+        "item_type": "word",
+        "prompt_snapshot": "环境",
+        "answer_snapshot": "environment",
+        "response_mode": "active_recall",
+        "source_validation_status": "verified",
+        "knowledge_points": ["active_recall", "spelling"],
+        "external_references": [
+          {"namespace": "demo_vocab", "reference_type": "entry_id", "external_id": "VOC-DEMO-001", "source_validation_status": "verified"}
+        ]
+      }
+    }
+  ]
+}
+

@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/english-tracker/attempts-import.schema.json",
+  "title": "English Tracker Attempts Import",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "idempotency_key", "source_thread", "student_id", "session_id", "attempts"],
+  "properties": {
+    "event_id": {"type": "string", "minLength": 1},
+    "idempotency_key": {"type": "string", "minLength": 1},
+    "source_thread": {"enum": ["engineering", "dictation", "courseware", "manual", "migration"]},
+    "student_id": {"type": "string"},
+    "session_id": {"type": "string"},
+    "attempts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["event_id", "attempted_at", "answer_capture_status", "evaluation"],
+        "oneOf": [{"required": ["item_id"]}, {"required": ["item"]}],
+        "properties": {
+          "attempt_id": {"type": "string"},
+          "event_id": {"type": "string"},
+          "item_id": {"type": "string"},
+          "attempted_at": {"type": "string"},
+          "student_answer": {"type": ["string", "null"]},
+          "standard_answer": {"type": ["string", "null"]},
+          "answer_capture_status": {"enum": ["captured", "captured_blank", "not_captured", "unknown_legacy"]},
+          "attempt_phase": {"enum": ["first", "review", "practice", "exam"]},
+          "response_mode": {"enum": ["active_recall", "recognition", "production", "mixed", "unknown"]},
+          "validation_status": {"enum": ["verified", "source_checked", "unverified", "needs_check"]},
+          "teacher_note": {"type": ["string", "null"]},
+          "source_material_ref": {"type": ["string", "null"]},
+          "error_types": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {"type": "string"},
+                {
+                  "type": "object",
+                  "properties": {
+                    "code": {"type": "string"},
+                    "raw_error_type": {"type": "string"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "note": {"type": "string"}
+                  }
+                }
+              ]
+            }
+          },
+          "evaluation": {
+            "type": "object",
+            "required": ["result"],
+            "properties": {
+              "result": {"enum": ["correct", "partial", "wrong", "needs_check"]},
+              "score": {"type": ["number", "null"]},
+              "max_score": {"type": ["number", "null"]},
+              "evaluated_by": {"type": "string"},
+              "is_human_corrected": {"type": "boolean"},
+              "note": {"type": ["string", "null"]}
+            }
+          },
+          "item": {"$ref": "#/$defs/item"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "externalReference": {
+      "type": "object",
+      "required": ["namespace", "reference_type", "external_id"],
+      "properties": {
+        "namespace": {"type": "string"},
+        "reference_type": {"type": "string"},
+        "external_id": {"type": "string"},
+        "external_parent_id": {"type": ["string", "null"]},
+        "source_validation_status": {"type": "string"},
+        "metadata": {"type": "object"}
+      }
+    },
+    "item": {
+      "type": "object",
+      "required": ["domain", "item_type"],
+      "properties": {
+        "item_id": {"type": "string"},
+        "domain": {"enum": ["vocabulary", "grammar", "reading", "translation", "writing", "sentence", "knowledge"]},
+        "item_type": {"type": "string"},
+        "prompt_snapshot": {"type": ["string", "null"]},
+        "answer_snapshot": {"type": ["string", "null"]},
+        "direction": {"type": ["string", "null"]},
+        "response_mode": {"enum": ["active_recall", "recognition", "production", "mixed", "unknown"]},
+        "difficulty_label": {"type": ["string", "null"]},
+        "difficulty_weight": {"type": "number", "exclusiveMinimum": 0},
+        "source_validation_status": {"type": "string"},
+        "knowledge_points": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {"type": "string"},
+              {"type": "object", "required": ["code"], "properties": {"code": {"type": "string"}, "role": {"type": "string"}, "weight": {"type": "number"}, "evidence_source": {"type": "string"}, "validation_status": {"type": "string"}}}
+            ]
+          }
+        },
+        "external_references": {"type": "array", "items": {"$ref": "#/$defs/externalReference"}},
+        "metadata": {"type": "object"}
+      }
+    }
+  }
+}
+
