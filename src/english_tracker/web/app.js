@@ -303,7 +303,9 @@ async function renderDictation() {
 
 async function renderWorkflow() {
   const data = await api('/api/workflow');
+  const notice = data.system_notice || {};
   view.innerHTML = `
+    <div class="callout" style="margin-bottom:18px"><h3>统一迁移已经完成</h3><p>${esc(notice.message || '学习数据已经写入统一数据库。')} ${esc(notice.launcher_purpose || '')} 当前有效真实作答 ${num(notice.existing_attempt_count)} 次。</p></div>
     <div class="channel-grid">${data.channels.map(channel => `<article class="channel"><p class="eyebrow">${esc(channel.channel_key)}</p><h2>${esc(channel.display_name)}</h2><p>${esc(channel.responsibility)}</p><dl class="definition-list"><div><dt>读取</dt><dd>${esc(channel.reads_from)}</dd></div><div><dt>写入</dt><dd>${esc(channel.writes_through)}</dd></div><div><dt>实时上下文</dt><dd class="mono">http://127.0.0.1:8788${esc(channel.context_endpoint)}</dd></div><div><dt>状态</dt><dd>${status(channel.status)}</dd></div></dl><button class="button button-secondary button-small" data-copy="http://127.0.0.1:8788${esc(channel.context_endpoint)}">复制接口</button></article>`).join('')}</div>
     <section class="panel" style="margin-top:18px"><div class="panel-head"><div><h2>统一工作清单</h2><p>所有对话读取同一状态，不再重复手工写交接</p></div></div><div class="panel-body"><div class="table-wrap"><table><thead><tr><th>领域</th><th>任务</th><th>负责人</th><th>完成量</th><th>状态</th><th>证据</th></tr></thead><tbody>${data.work_items.map(item => `<tr><td>${esc(item.area)}</td><td>${esc(item.title)}</td><td>${esc(item.owner_channel)}</td><td>${num(item.completed_units)} / ${num(item.total_units)} ${esc(item.unit_label)}</td><td>${status(item.status)}</td><td class="mono">${esc(item.evidence_path || '—')}</td></tr>`).join('')}</tbody></table></div></div></section>
     <div class="callout" style="margin-top:18px"><h3>以后怎么交接</h3><p>另一个对话优先读取自己的实时上下文接口；需要命令细节时再看 HANDOFF_FOR_THREADS.md。课堂和听写结果统一通过 API/JSON 契约写入，不直接改 SQLite。</p></div>`;

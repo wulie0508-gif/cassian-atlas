@@ -179,7 +179,21 @@ def workflow_summary(conn) -> dict[str, Any]:
             """
         )
     ]
-    return {"channels": channels, "work_items": work_items}
+    attempt_count = conn.execute(
+        "SELECT COUNT(*) FROM attempts WHERE record_status='active'"
+    ).fetchone()[0]
+    return {
+        "system_notice": {
+            "status": "completed",
+            "migration_completed": True,
+            "existing_attempt_count": attempt_count,
+            "message": "旧错题库和真实作答已经迁入统一数据库；无需点击启动器来触发迁移或解析。",
+            "launcher_purpose": "启动器只负责打开本地可视化网站并提供HTTP接口；数据库成果已经落盘。",
+            "offline_data_scope": "当前仅缺少明确分类为正式线下闭卷整卷或双周混合测的校准成绩，不是缺少错题或学习记录。",
+        },
+        "channels": channels,
+        "work_items": work_items,
+    }
 
 
 def learning_summary(conn, student_id: str) -> dict[str, Any]:
@@ -218,6 +232,7 @@ def overview(
 def context_for(conn, audience: str, *, student_id: str, question_bank: str | Path) -> dict[str, Any]:
     if audience in {"courseware", "dictation"}:
         result = export_context(conn, student_id, audience)
+        result["system_notice"] = workflow_summary(conn)["system_notice"]
         result["question_bank"] = question_bank_summary(question_bank)["counts"]
         result["web_endpoints"] = {
             "question_search": "/api/questions",
