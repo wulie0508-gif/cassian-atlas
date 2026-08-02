@@ -1,10 +1,10 @@
 <div align="center">
   <img src="docs/assets/logo.svg" width="420" alt="OpenTutor Ledger">
-  <p><strong>A local-first learning evidence layer for humans and agents.</strong></p>
+  <p><strong>Local-first learning evidence infrastructure for teachers, learners, and AI agents.</strong></p>
   <p>
-    <a href="README.zh-CN.md">中文</a> ·
-    <a href="#quick-start">Quick start</a> ·
-    <a href="docs/PRIVACY_BOUNDARY.md">Privacy boundary</a> ·
+    <a href="README.zh-CN.md">中文</a> |
+    <a href="#quick-start">Quick start</a> |
+    <a href="docs/PRIVACY_BOUNDARY.md">Privacy boundary</a> |
     <a href="CONTRIBUTING.md">Contributing</a>
   </p>
   <p>
@@ -15,11 +15,11 @@
   </p>
 </div>
 
----
+## One evidence ledger for daily practice, controlled tests, and agent workflows.
 
-## Learning tools remember answers. OpenTutor Ledger remembers evidence.
-
-OpenTutor Ledger is a private learning record and orchestration layer. It gives teachers, learners, and AI agents one durable answer to five recurring questions:
+OpenTutor Ledger records what a learner attempted, how it was evaluated, which
+knowledge was involved, and what should be reviewed next. It gives teachers,
+learners, and AI agents one durable answer to five recurring questions:
 
 1. What did this learner actually do?
 2. What was tested, and what evidence supports the diagnosis?
@@ -27,9 +27,14 @@ OpenTutor Ledger is a private learning record and orchestration layer. It gives 
 4. How much should this result influence the trend?
 5. Can another agent reuse the answer without recomputing everything?
 
-It stores immutable attempts, revisioned evaluations, sample-aware mastery, review queues, and auditable agent suggestions in a normalized SQLite database. The local web app stays intentionally calm: current state, the smallest next action, and automation health first; exact weights and evidence remain one click away.
+The system stores immutable attempts, revisioned evaluations, sample-aware
+mastery, review queues, and auditable agent suggestions in a normalized SQLite
+database. The local interface stays intentionally calm: current state, the
+smallest next action, and automation health first. Exact weights and evidence
+remain one click away.
 
-> **The product boundary:** precise in the back, light in the front. Agents do the clerical work. Humans make the decisions that require judgment.
+> **Product boundary:** precise in the back, light in the front. Agents handle
+> repetitive clerical work. Humans retain judgment.
 
 ## What ships
 
@@ -107,7 +112,7 @@ $env:ENGLISH_TRACKER_LIBRARY_ROOT = "$env:USERPROFILE\OpenTutorData\source-libra
 python -m english_tracker serve --host 127.0.0.1 --port 8788 --open-browser
 ```
 
-The empty question-bank shell contains schema only—no exercises. Bring your own licensed or original content through an adapter and keep it outside the repository.
+The empty question-bank shell contains schema only-no exercises. Bring your own licensed or original content through an adapter and keep it outside the repository.
 
 ### 3. Record an anonymous learning event
 
@@ -180,7 +185,7 @@ The evidence store, multi-learner isolation, subject registry, Chinese/English U
 
 ## Contributing
 
-Contributions are welcome—especially generic subject adapters, accessibility improvements, privacy tooling, and evidence-calibration research. Read [CONTRIBUTING.md](CONTRIBUTING.md) first.
+Contributions are welcome-especially generic subject adapters, accessibility improvements, privacy tooling, and evidence-calibration research. Read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 
 ## License
 
