@@ -4,23 +4,28 @@ import argparse
 import json
 import sqlite3
 import sys
+import webbrowser
+from contextlib import closing
 from pathlib import Path
 from typing import Any, Callable
 
+from . import __version__
 from .analytics import due_reviews, export_context, session_acceptance_report, weakness_report
 from .backup import create_backup
 from .db import (
     ConfigurationError,
+    apply_migrations,
     connect,
     database_path,
     ensure_private_layout,
-    initialize_database,
+    pending_migration_versions,
     require_initialized,
     resolve_data_dir,
 )
 from .ingest import IngestConflict, import_attempts, import_progress, import_session, undo_ingest_event
 from .grammar_catalog import coverage_matrix, passage_coverage, question_knowledge, sync_grammar_catalog, write_coverage_csv
 from .enrichment import enrich_question_bank, search_knowledge
+from .generation import generation_detail, list_generations, start_generation, update_generation
 from .library import (
     convert_legacy_word,
     extract_library_text,
@@ -35,11 +40,41 @@ from .library import (
 from .question_pipeline import pair_library_sources, structure_library, structure_summary
 from .migrate_legacy import migrate_legacy
 from .metrics import trend_report, weekly_report
+from .orchestration import (
+    agent_dashboard,
+    append_run_event,
+    capability_manifest,
+    list_runs,
+    plan_route,
+    register_run,
+    run_detail,
+)
 from .quality import quality_markdown, run_quality_checks
+from .runtime import (
+    CONFIG_KEYS,
+    RuntimeConfig,
+    apply_runtime_config,
+    config_summary,
+    default_config_path,
+    effective_runtime_values,
+    load_runtime_config,
+    set_config_value,
+)
 from .selection import weighted_set_cover
+from .server_control import server_status, start_server, stop_server
 from .util import read_json, write_json
 from .webapp import configured_library_root, configured_question_bank, serve
 from .weights import weight_policy_report, weighted_mastery_report
+from .workflows import record_assessment, record_dictation, record_reading_diagnostics
+from .workspace import (
+    create_student,
+    deactivate_student,
+    enroll_student,
+    require_student_enrollment,
+    student_detail,
+    student_summaries,
+    update_student,
+)
 
 
 def _emit(value: Any, output: str | None = None) -> None:
@@ -63,12 +98,86 @@ def _backup(data_dir: Path, reason: str) -> str | None:
     return str(result) if result else None
 
 
+def _runtime(args) -> RuntimeConfig:
+    return getattr(args, "_runtime_config", RuntimeConfig(None, "none", {}, False))
+
+
+def cmd_config_show(args) -> int:
+    _emit(
+        config_summary(
+            _runtime(args),
+            explicit_data_dir=args.data_dir,
+        )
+    )
+    return 0
+
+
+def cmd_config_set(args) -> int:
+    current = _runtime(args)
+    path = current.path or default_config_path()
+    updated = set_config_value(path, args.key, args.value)
+    apply_runtime_config(updated)
+    result = config_summary(updated, explicit_data_dir=args.data_dir)
+    result["status"] = "saved"
+    result["updated_key"] = args.key
+    _emit(result)
+    return 0
+
+
 def cmd_init(args) -> int:
     data_dir = _data_dir(args)
-    backup = _backup(data_dir, "pre-schema-migration") if database_path(data_dir).exists() else None
-    result = initialize_database(data_dir, student_id=args.student, display_name=args.display_name)
-    result["pre_migration_backup"] = backup
-    _emit(result)
+    ensure_private_layout(data_dir)
+    db_path = database_path(data_dir)
+    existed = db_path.exists()
+    pending: list[str] = []
+    if existed:
+        with closing(connect(db_path, readonly=True)) as conn:
+            pending = pending_migration_versions(conn)
+    backup = _backup(data_dir, "pre-schema-migration") if pending else None
+    with closing(connect(db_path)) as conn:
+        migrations = apply_migrations(conn)
+    _emit(
+        {
+            "status": "initialized" if not existed else ("upgraded" if migrations else "ready"),
+            "database": str(db_path),
+            "migrations_applied": migrations,
+            "pending_before": pending,
+            "pre_migration_backup": backup,
+            "student_count_created": 0,
+            "next": "opentutor student add --student STU-<ID> --display-name <name>",
+        }
+    )
+    return 0
+
+
+def cmd_upgrade(args) -> int:
+    data_dir = _data_dir(args)
+    db_path = require_initialized(data_dir)
+    with closing(connect(db_path, readonly=True)) as conn:
+        pending = pending_migration_versions(conn)
+    if not pending:
+        _emit(
+            {
+                "status": "up_to_date",
+                "database": str(db_path),
+                "migrations_applied": [],
+                "student_count_created": 0,
+            }
+        )
+        return 0
+    backup = _backup(data_dir, "pre-schema-upgrade")
+    with closing(connect(db_path)) as conn:
+        migrations = apply_migrations(conn)
+    _emit(
+        {
+            "status": "upgraded",
+            "database": str(db_path),
+            "migrations_applied": migrations,
+            "pending_before": pending,
+            "pre_migration_backup": backup,
+            "student_count_created": 0,
+        }
+    )
     return 0
 
 
@@ -76,6 +185,105 @@ def cmd_backup(args) -> int:
     data_dir = _data_dir(args)
     path = _backup(data_dir, args.reason)
     _emit({"status": "created" if path else "skipped_empty_database", "backup": path})
+    return 0
+
+
+def _student_profile_from_args(args) -> dict[str, Any]:
+    return {
+        field: value
+        for field in (
+            "grade_level",
+            "exam_system",
+            "target_exam_date",
+            "target_score",
+            "weekly_hours",
+            "course_stage",
+            "teacher_notes",
+        )
+        if (value := getattr(args, field, None)) is not None
+    }
+
+
+def cmd_student_list(args) -> int:
+    _, conn = _open(args)
+    try:
+        result = student_summaries(conn, include_inactive=args.include_inactive)
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_student_add(args) -> int:
+    data_dir, conn = _open(args)
+    backup = _backup(data_dir, "student-add")
+    try:
+        result = create_student(
+            conn,
+            {
+                "student_id": args.student,
+                "display_name": args.display_name,
+                "timezone": args.timezone,
+                "target_retention": args.target_retention,
+                "subject_codes": args.subject,
+                "profile": _student_profile_from_args(args),
+            },
+        )
+    finally:
+        conn.close()
+    result["backup"] = backup
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_student_show(args) -> int:
+    _, conn = _open(args)
+    try:
+        result = student_detail(conn, args.student, include_inactive=True)
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_student_update(args) -> int:
+    payload: dict[str, Any] = _student_profile_from_args(args)
+    for field in ("display_name", "timezone", "target_retention"):
+        value = getattr(args, field, None)
+        if value is not None:
+            payload[field] = value
+    data_dir, conn = _open(args)
+    backup = _backup(data_dir, "student-update")
+    try:
+        result = update_student(conn, args.student, payload)
+    finally:
+        conn.close()
+    result["backup"] = backup
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_student_enroll(args) -> int:
+    data_dir, conn = _open(args)
+    backup = _backup(data_dir, "student-enroll")
+    try:
+        result = enroll_student(conn, args.student, args.subject)
+    finally:
+        conn.close()
+    result["backup"] = backup
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_student_deactivate(args) -> int:
+    data_dir, conn = _open(args)
+    backup = _backup(data_dir, "student-deactivate")
+    try:
+        result = deactivate_student(conn, args.student)
+    finally:
+        conn.close()
+    result["backup"] = backup
+    _emit(result, args.output)
     return 0
 
 
@@ -89,6 +297,110 @@ def _import_command(args, importer: Callable) -> int:
         conn.close()
     result["backup"] = backup
     _emit(result)
+    return 0
+
+
+def _explicit_student_payload(args) -> dict[str, Any]:
+    payload = read_json(args.input)
+    if not isinstance(payload, dict):
+        raise ValueError("input JSON must be an object")
+    explicit_student = str(args.student or "").strip().upper()
+    payload_student = str(payload.get("student_id") or "").strip().upper()
+    if payload_student and payload_student != explicit_student:
+        raise ValueError(
+            f"input student_id {payload_student} conflicts with explicit --student {explicit_student}"
+        )
+    payload["student_id"] = explicit_student
+    return payload
+
+
+def _record_workflow(args, recorder: Callable, *, reason: str) -> int:
+    payload = _explicit_student_payload(args)
+    data_dir, conn = _open(args)
+    backup = _backup(data_dir, reason)
+    try:
+        result = recorder(conn, payload, backup_path=backup)
+    finally:
+        conn.close()
+    result["backup"] = backup
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_assessment_record(args) -> int:
+    return _record_workflow(args, record_assessment, reason="assessment-record")
+
+
+def cmd_dictation_record(args) -> int:
+    return _record_workflow(args, record_dictation, reason="dictation-record")
+
+
+def cmd_reading_diagnostics_record(args) -> int:
+    return _record_workflow(
+        args,
+        record_reading_diagnostics,
+        reason="reading-diagnostics-record",
+    )
+
+
+def cmd_generation_start(args) -> int:
+    payload = _explicit_student_payload(args)
+    data_dir, conn = _open(args)
+    backup = _backup(data_dir, "generation-start")
+    try:
+        result = start_generation(conn, payload)
+    finally:
+        conn.close()
+    result["backup"] = backup
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_generation_update(args) -> int:
+    payload = _explicit_student_payload(args)
+    data_dir, conn = _open(args)
+    backup = _backup(data_dir, "generation-update")
+    try:
+        result = update_generation(
+            conn,
+            args.generation,
+            payload,
+            student_id=payload["student_id"],
+        )
+    finally:
+        conn.close()
+    result["backup"] = backup
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_generation_show(args) -> int:
+    _, conn = _open(args)
+    try:
+        student = student_detail(conn, args.student, include_inactive=False)
+        result = generation_detail(
+            conn,
+            args.generation,
+            student_id=student["student_id"],
+        )
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_generation_list(args) -> int:
+    _, conn = _open(args)
+    try:
+        student = student_detail(conn, args.student, include_inactive=False)
+        result = list_generations(
+            conn,
+            student_id=student["student_id"],
+            limit=args.limit,
+        )
+    finally:
+        conn.close()
+    _emit(result, args.output)
     return 0
 
 
@@ -306,11 +618,40 @@ def cmd_quality(args) -> int:
 
 
 def cmd_db_info(args) -> int:
-    data_dir, conn = _open(args)
+    data_dir = _data_dir(args)
+    db_path = database_path(data_dir)
+    runtime = config_summary(_runtime(args), explicit_data_dir=args.data_dir)
+    if not db_path.exists():
+        _emit(
+            {
+                "status": "uninitialized",
+                "app_version": __version__,
+                "database": str(db_path),
+                "pending_migrations": [],
+                "migration_required": False,
+                "runtime": runtime,
+                "next": "opentutor init",
+            }
+        )
+        return 0
+    conn = connect(db_path, readonly=True)
     try:
-        migrations = [dict(row) for row in conn.execute("SELECT * FROM schema_migrations ORDER BY version")]
+        table_names = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        migrations = (
+            [dict(row) for row in conn.execute("SELECT * FROM schema_migrations ORDER BY version")]
+            if "schema_migrations" in table_names
+            else []
+        )
+        pending = pending_migration_versions(conn)
         counts = {
-            table: conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+            table: (
+                conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+                if table in table_names
+                else None
+            )
             for table in ("students", "learning_sessions", "content_items", "attempts", "review_tasks", "ingest_events")
         }
         pragmas = {
@@ -320,7 +661,20 @@ def cmd_db_info(args) -> int:
         }
     finally:
         conn.close()
-    _emit({"database": str(database_path(data_dir)), "migrations": migrations, "counts": counts, "pragmas": pragmas})
+    _emit(
+        {
+            "status": "upgrade_required" if pending else "ready",
+            "app_version": __version__,
+            "database": str(db_path),
+            "migrations": migrations,
+            "pending_migrations": pending,
+            "migration_required": bool(pending),
+            "upgrade_command": "opentutor upgrade" if pending else None,
+            "counts": counts,
+            "pragmas": pragmas,
+            "runtime": runtime,
+        }
+    )
     return 0
 
 
@@ -506,8 +860,106 @@ def cmd_weighted_mastery(args) -> int:
     return 0
 
 
+def cmd_agent_capabilities(args) -> int:
+    _emit(capability_manifest(), args.output)
+    return 0
+
+
+def cmd_agent_route(args) -> int:
+    _, conn = _open(args)
+    try:
+        student_id, subject_code = require_student_enrollment(
+            conn,
+            args.student,
+            args.subject,
+        )
+        if args.register:
+            result = register_run(
+                conn,
+                {
+                    "request_text": args.request,
+                    "student_id": student_id,
+                    "subject_code": subject_code,
+                    "source_thread": args.source_thread,
+                    "idempotency_key": args.idempotency_key,
+                    "title": args.title,
+                },
+            )
+        else:
+            result = plan_route(
+                args.request,
+                student_id=student_id,
+                subject_code=subject_code,
+            )
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_agent_runs(args) -> int:
+    _, conn = _open(args)
+    try:
+        student = student_detail(conn, args.student, include_inactive=False)
+        result = list_runs(conn, student_id=student["student_id"], status=args.status, limit=args.limit)
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_agent_show(args) -> int:
+    _, conn = _open(args)
+    try:
+        student = student_detail(conn, args.student, include_inactive=False)
+        result = run_detail(conn, args.run, student_id=student["student_id"])
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_agent_dashboard(args) -> int:
+    _, conn = _open(args)
+    try:
+        student = student_detail(conn, args.student, include_inactive=False)
+        result = agent_dashboard(
+            conn,
+            student_id=student["student_id"],
+            limit=args.limit,
+        )
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
+def cmd_agent_event(args) -> int:
+    _, conn = _open(args)
+    try:
+        result = append_run_event(
+            conn,
+            args.run,
+            {
+                "student_id": args.student,
+                "event_type": args.event_type,
+                "idempotency_key": args.idempotency_key,
+                "capability_key": args.capability,
+                "actor": args.actor,
+                "message": args.message,
+                "summary": args.summary,
+                "result_ref": args.result_ref,
+            },
+        )
+    finally:
+        conn.close()
+    _emit(result, args.output)
+    return 0
+
+
 def cmd_serve(args) -> int:
     data_dir = _data_dir(args)
+    require_initialized(data_dir)
     serve(
         data_dir,
         question_bank=configured_question_bank(args.question_bank),
@@ -520,19 +972,147 @@ def cmd_serve(args) -> int:
     return 0
 
 
+def _server_start(args) -> dict[str, Any]:
+    data_dir = _data_dir(args)
+    require_initialized(data_dir)
+    question_bank = configured_question_bank(None)
+    library_root = configured_library_root(None)
+    if not question_bank.is_file():
+        raise ValueError(f"Question bank not found: {question_bank}")
+    if not library_root.is_dir():
+        raise ValueError(f"Library root not found: {library_root}")
+    runtime = _runtime(args)
+    effective = effective_runtime_values(runtime, explicit_data_dir=args.data_dir)
+    return start_server(
+        data_dir,
+        config_path=runtime.path,
+        project_root=effective.get("project_root"),
+        student_id=args.student,
+        host=args.host,
+        port=args.port,
+        timeout=args.timeout,
+    )
+
+
+def cmd_server_status(args) -> int:
+    _emit(server_status(_data_dir(args), host=args.host, port=args.port))
+    return 0
+
+
+def cmd_server_start(args) -> int:
+    result = _server_start(args)
+    if args.open_browser:
+        webbrowser.open(result["url"])
+    _emit(result)
+    return 0
+
+
+def cmd_server_stop(args) -> int:
+    _emit(
+        stop_server(
+            _data_dir(args),
+            host=args.host,
+            port=args.port,
+            timeout=args.timeout,
+            force=args.force,
+        )
+    )
+    return 0
+
+
+def cmd_server_restart(args) -> int:
+    data_dir = _data_dir(args)
+    stopped = stop_server(
+        data_dir,
+        host=args.host,
+        port=args.port,
+        timeout=args.timeout,
+        force=args.force,
+    )
+    started = _server_start(args)
+    if args.open_browser:
+        webbrowser.open(started["url"])
+    _emit({"status": "running", "stop": stopped, "start": started})
+    return 0
+
+
+def _add_profile_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--grade-level")
+    parser.add_argument("--exam-system")
+    parser.add_argument("--target-exam-date", help="ISO date, for example 2027-01-08")
+    parser.add_argument("--target-score", type=float)
+    parser.add_argument("--weekly-hours", type=float)
+    parser.add_argument("--course-stage")
+    parser.add_argument("--teacher-notes")
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="english-tracker", description="Local, auditable English learning records")
+    parser = argparse.ArgumentParser(
+        prog="opentutor",
+        description="Codex-first control plane for local, auditable learning records",
+    )
+    parser.add_argument(
+        "--config",
+        help="Runtime JSON config; otherwise use OPEN_TUTOR_CONFIG or ~/.opentutor/config.json",
+    )
     parser.add_argument("--data-dir", help="Private runtime data directory; may also use ENGLISH_TRACKER_DATA_DIR")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    init = sub.add_parser("init", help="Create private folders and apply database migrations")
-    init.add_argument("--student", default="STU-001")
-    init.add_argument("--display-name", help="Private display name stored only in the local database")
-    init.set_defaults(func=cmd_init)
+    config = sub.add_parser("config", help="Inspect or update the private runtime configuration")
+    config_sub = config.add_subparsers(dest="config_command", required=True)
+    config_show = config_sub.add_parser("show", help="Show config discovery and effective runtime values")
+    config_show.set_defaults(func=cmd_config_show, allow_pending=True)
+    config_set = config_sub.add_parser("set", help="Persist one runtime setting")
+    config_set.add_argument("key", choices=CONFIG_KEYS)
+    config_set.add_argument("value")
+    config_set.set_defaults(func=cmd_config_set, allow_pending=True)
+
+    init = sub.add_parser("init", help="Create private folders and schema without adding a learner")
+    init.set_defaults(func=cmd_init, allow_pending=True)
+
+    upgrade = sub.add_parser("upgrade", help="Back up and apply pending schema migrations only")
+    upgrade.set_defaults(func=cmd_upgrade, allow_pending=True)
 
     backup = sub.add_parser("backup", help="Create an integrity-checked SQLite online backup")
     backup.add_argument("--reason", default="manual")
-    backup.set_defaults(func=cmd_backup)
+    backup.set_defaults(func=cmd_backup, allow_pending=True)
+
+    student = sub.add_parser("student", help="Explicit multi-learner workspace operations")
+    student_sub = student.add_subparsers(dest="student_command", required=True)
+    student_list = student_sub.add_parser("list", help="List learner workspaces")
+    student_list.add_argument("--include-inactive", action="store_true")
+    student_list.add_argument("--output")
+    student_list.set_defaults(func=cmd_student_list)
+    student_add = student_sub.add_parser("add", help="Add one real learner with an explicit ID")
+    student_add.add_argument("--student", required=True, help="Stable explicit ID such as STU-002")
+    student_add.add_argument("--display-name", required=True)
+    student_add.add_argument("--timezone", default="Asia/Shanghai")
+    student_add.add_argument("--target-retention", type=float, default=0.90)
+    student_add.add_argument("--subject", action="append", help="Repeat to enroll multiple subjects; defaults to english")
+    _add_profile_arguments(student_add)
+    student_add.add_argument("--output")
+    student_add.set_defaults(func=cmd_student_add)
+    student_show = student_sub.add_parser("show", help="Show one learner and enrollment state")
+    student_show.add_argument("--student", required=True)
+    student_show.add_argument("--output")
+    student_show.set_defaults(func=cmd_student_show)
+    student_update = student_sub.add_parser("update", help="Update identity or learning profile fields")
+    student_update.add_argument("--student", required=True)
+    student_update.add_argument("--display-name")
+    student_update.add_argument("--timezone")
+    student_update.add_argument("--target-retention", type=float)
+    _add_profile_arguments(student_update)
+    student_update.add_argument("--output")
+    student_update.set_defaults(func=cmd_student_update)
+    student_enroll = student_sub.add_parser("enroll", help="Enroll an active learner in one or more subjects")
+    student_enroll.add_argument("--student", required=True)
+    student_enroll.add_argument("--subject", action="append", required=True)
+    student_enroll.add_argument("--output")
+    student_enroll.set_defaults(func=cmd_student_enroll)
+    student_deactivate = student_sub.add_parser("deactivate", help="Deactivate a learner without deleting evidence")
+    student_deactivate.add_argument("--student", required=True)
+    student_deactivate.add_argument("--output")
+    student_deactivate.set_defaults(func=cmd_student_deactivate)
 
     session = sub.add_parser("session", help="Learning session operations")
     session_sub = session.add_subparsers(dest="session_command", required=True)
@@ -555,6 +1135,62 @@ def build_parser() -> argparse.ArgumentParser:
     progress_import = progress_sub.add_parser("import")
     progress_import.add_argument("--input", required=True)
     progress_import.set_defaults(func=cmd_progress_import)
+
+    assessment = sub.add_parser("assessment", help="Record deterministic scored assessments")
+    assessment_sub = assessment.add_subparsers(dest="assessment_command", required=True)
+    assessment_record = assessment_sub.add_parser("record", help="Record one assessment from JSON")
+    assessment_record.add_argument("--student", required=True)
+    assessment_record.add_argument("--input", required=True)
+    assessment_record.add_argument("--output")
+    assessment_record.set_defaults(func=cmd_assessment_record)
+
+    dictation = sub.add_parser("dictation", help="Record and grade deterministic dictation evidence")
+    dictation_sub = dictation.add_subparsers(dest="dictation_command", required=True)
+    dictation_record = dictation_sub.add_parser("record", help="Record one dictation from JSON")
+    dictation_record.add_argument("--student", required=True)
+    dictation_record.add_argument("--input", required=True)
+    dictation_record.add_argument("--output")
+    dictation_record.set_defaults(func=cmd_dictation_record)
+
+    reading = sub.add_parser("reading", help="Reading evidence operations")
+    reading_sub = reading.add_subparsers(dest="reading_command", required=True)
+    reading_diagnostics = reading_sub.add_parser("diagnostics", help="Reading error diagnostics")
+    reading_diagnostics_sub = reading_diagnostics.add_subparsers(
+        dest="reading_diagnostics_command",
+        required=True,
+    )
+    reading_diagnostics_record = reading_diagnostics_sub.add_parser(
+        "record",
+        help="Record attempt-level reading diagnostics from JSON",
+    )
+    reading_diagnostics_record.add_argument("--student", required=True)
+    reading_diagnostics_record.add_argument("--input", required=True)
+    reading_diagnostics_record.add_argument("--output")
+    reading_diagnostics_record.set_defaults(func=cmd_reading_diagnostics_record)
+
+    generation = sub.add_parser("generation", help="Track source-bound Codex artifact generation")
+    generation_sub = generation.add_subparsers(dest="generation_command", required=True)
+    generation_start = generation_sub.add_parser("start", help="Start an idempotent generation from JSON")
+    generation_start.add_argument("--student", required=True)
+    generation_start.add_argument("--input", required=True)
+    generation_start.add_argument("--output")
+    generation_start.set_defaults(func=cmd_generation_start)
+    generation_update = generation_sub.add_parser("update", help="Update generation status or output from JSON")
+    generation_update.add_argument("--student", required=True)
+    generation_update.add_argument("--generation", required=True)
+    generation_update.add_argument("--input", required=True)
+    generation_update.add_argument("--output")
+    generation_update.set_defaults(func=cmd_generation_update)
+    generation_show = generation_sub.add_parser("show", help="Show one learner-owned generation")
+    generation_show.add_argument("--student", required=True)
+    generation_show.add_argument("--generation", required=True)
+    generation_show.add_argument("--output")
+    generation_show.set_defaults(func=cmd_generation_show)
+    generation_list = generation_sub.add_parser("list", help="List one learner's generations")
+    generation_list.add_argument("--student", required=True)
+    generation_list.add_argument("--limit", type=int, default=30)
+    generation_list.add_argument("--output")
+    generation_list.set_defaults(func=cmd_generation_list)
 
     weaknesses = sub.add_parser("weaknesses", help="Evidence-backed weakness reports")
     weaknesses_sub = weaknesses.add_subparsers(dest="weakness_command", required=True)
@@ -750,18 +1386,107 @@ def build_parser() -> argparse.ArgumentParser:
     library_ocr_import.add_argument("--output")
     library_ocr_import.set_defaults(func=cmd_library_import_ocr)
 
-    web = sub.add_parser("serve", help="Start the local learning-management website")
+    agent = sub.add_parser("agent", help="Deterministic specialist routing and dashboard run ledger")
+    agent_sub = agent.add_subparsers(dest="agent_command", required=True)
+    agent_capabilities = agent_sub.add_parser("capabilities", help="List specialist skills and stable endpoints")
+    agent_capabilities.add_argument("--output")
+    agent_capabilities.set_defaults(func=cmd_agent_capabilities)
+    agent_route = agent_sub.add_parser("route", help="Plan the smallest specialist chain for one request")
+    agent_route.add_argument("--request", required=True)
+    agent_route.add_argument("--student", required=True)
+    agent_route.add_argument("--subject", default="english")
+    agent_route.add_argument("--source-thread", default="orchestrator")
+    agent_route.add_argument("--idempotency-key")
+    agent_route.add_argument("--title")
+    agent_route.add_argument("--register", action="store_true", help="Create a dashboard run after routing")
+    agent_route.add_argument("--output")
+    agent_route.set_defaults(func=cmd_agent_route)
+    agent_runs = agent_sub.add_parser("runs", help="List recent specialist runs")
+    agent_runs.add_argument("--student", required=True)
+    agent_runs.add_argument("--status", choices=["planned", "in_progress", "needs_input", "completed", "failed", "cancelled"])
+    agent_runs.add_argument("--limit", type=int, default=30)
+    agent_runs.add_argument("--output")
+    agent_runs.set_defaults(func=cmd_agent_runs)
+    agent_show = agent_sub.add_parser("show", help="Show one learner-owned specialist run")
+    agent_show.add_argument("--student", required=True)
+    agent_show.add_argument("--run", required=True)
+    agent_show.add_argument("--output")
+    agent_show.set_defaults(func=cmd_agent_show)
+    agent_dashboard_parser = agent_sub.add_parser("dashboard", help="Show the learner-scoped Agent run dashboard")
+    agent_dashboard_parser.add_argument("--student", required=True)
+    agent_dashboard_parser.add_argument("--limit", type=int, default=12)
+    agent_dashboard_parser.add_argument("--output")
+    agent_dashboard_parser.set_defaults(func=cmd_agent_dashboard)
+    agent_event = agent_sub.add_parser("event", help="Append progress to a routed task")
+    agent_event.add_argument("--student", required=True)
+    agent_event.add_argument("--run", required=True)
+    agent_event.add_argument("--event-type", required=True, choices=["started", "progress", "needs_input", "completed", "failed", "cancelled"])
+    agent_event.add_argument("--idempotency-key", required=True)
+    agent_event.add_argument("--capability", required=True)
+    agent_event.add_argument("--actor", default="specialist")
+    agent_event.add_argument("--message", required=True)
+    agent_event.add_argument("--summary")
+    agent_event.add_argument("--result-ref")
+    agent_event.add_argument("--output")
+    agent_event.set_defaults(func=cmd_agent_event)
+
+    server = sub.add_parser("server", help="Manage the local read-only dashboard process")
+    server_sub = server.add_subparsers(dest="server_command", required=True)
+    server_status_parser = server_sub.add_parser("status", help="Verify PID, version, schema, and database")
+    server_status_parser.add_argument("--host", default="127.0.0.1")
+    server_status_parser.add_argument("--port", type=int, default=8788)
+    server_status_parser.set_defaults(func=cmd_server_status, allow_pending=True)
+    server_start_parser = server_sub.add_parser("start", help="Start a verified hidden background server")
+    server_start_parser.add_argument("--student", help="Optional explicit initial learner; no implicit default")
+    server_start_parser.add_argument("--host", default="127.0.0.1")
+    server_start_parser.add_argument("--port", type=int, default=8788)
+    server_start_parser.add_argument("--timeout", type=float, default=60)
+    server_start_parser.add_argument("--open-browser", action="store_true")
+    server_start_parser.set_defaults(func=cmd_server_start)
+    server_stop_parser = server_sub.add_parser("stop", help="Stop only the process verified for this runtime")
+    server_stop_parser.add_argument("--host", default="127.0.0.1")
+    server_stop_parser.add_argument("--port", type=int, default=8788)
+    server_stop_parser.add_argument("--timeout", type=float, default=15)
+    server_stop_parser.add_argument("--force", action="store_true", help="Allow stopping a managed but unhealthy PID")
+    server_stop_parser.set_defaults(func=cmd_server_stop, allow_pending=True)
+    server_restart_parser = server_sub.add_parser("restart", help="Stop the verified server and start the current version")
+    server_restart_parser.add_argument("--student", help="Optional explicit initial learner; no implicit default")
+    server_restart_parser.add_argument("--host", default="127.0.0.1")
+    server_restart_parser.add_argument("--port", type=int, default=8788)
+    server_restart_parser.add_argument("--timeout", type=float, default=60)
+    server_restart_parser.add_argument("--force", action="store_true", help="Allow stopping a managed but unhealthy PID")
+    server_restart_parser.add_argument("--open-browser", action="store_true")
+    server_restart_parser.set_defaults(func=cmd_server_restart)
+
+    web = sub.add_parser("serve", help="Run the local dashboard in the foreground")
     web.add_argument("--question-bank")
     web.add_argument("--library-root")
-    web.add_argument("--student", default="STU-001")
+    web.add_argument("--student", help="Optional explicit initial learner; no implicit default")
     web.add_argument("--host", default="127.0.0.1")
     web.add_argument("--port", type=int, default=8788)
     web.add_argument("--open-browser", action="store_true")
     web.set_defaults(func=cmd_serve)
 
     info = sub.add_parser("info", help="Show database configuration and counts")
-    info.set_defaults(func=cmd_db_info)
+    info.set_defaults(func=cmd_db_info, allow_pending=True)
     return parser
+
+
+def _guard_current_schema(args) -> None:
+    if getattr(args, "allow_pending", False):
+        return
+    data_dir = _data_dir(args)
+    db_path = database_path(data_dir)
+    if not db_path.exists():
+        return
+    with closing(connect(db_path, readonly=True)) as conn:
+        pending = pending_migration_versions(conn)
+    if pending:
+        versions = ", ".join(pending)
+        raise ConfigurationError(
+            f"Database upgrade required; pending migration(s): {versions}. "
+            "Run `opentutor upgrade` before this command."
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -772,6 +1497,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        allow_missing_config = args.command == "config" and args.config_command == "set"
+        runtime = load_runtime_config(args.config, allow_missing=allow_missing_config)
+        apply_runtime_config(runtime)
+        args._runtime_config = runtime
+        _guard_current_schema(args)
         return int(args.func(args))
     except (ConfigurationError, IngestConflict, ValueError, KeyError, RuntimeError, sqlite3.Error) as exc:  # type: ignore[name-defined]
         print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import subprocess
 from pathlib import Path
@@ -15,9 +16,21 @@ PRIVATE_PATTERNS = {
     "Windows user path": re.compile(r"[A-Za-z]:\\Users\\[^\\\s]+", re.IGNORECASE),
     "private recovered-file path": re.compile(r"[A-Za-z]:\\[^\r\n]*" + RECOVERED_MARKER, re.IGNORECASE),
     "private learner marker": re.compile("胡" + "楠"),
-    "private database marker": re.compile("hunan" + "_learning", re.IGNORECASE),
+    "private learner romanization": re.compile("hu" + r"[\s_-]*" + "nan", re.IGNORECASE),
+    "private database marker": re.compile("hu" + "nan" + "_learning", re.IGNORECASE),
 }
 TEXT_SUFFIXES = {".py", ".md", ".json", ".yaml", ".yml", ".toml", ".sql", ".txt", ".js", ".css", ".html", ".svg", ".ps1", ".cmd", ".sh"}
+PUBLIC_BINARY_ASSETS = {
+    Path("site/assets/social-card.png"): "97a6132b47be9c63836afa6b2d2eb1e9148fc28e9a38807b560a9d78b4a64c7e",
+}
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def tracked_files() -> list[Path]:
@@ -33,7 +46,11 @@ def main() -> int:
     for path in tracked_files():
         relative = path.relative_to(ROOT)
         if path.suffix.lower() in BLOCKED_SUFFIXES:
-            violations.append(f"blocked content type: {relative}")
+            expected_hash = PUBLIC_BINARY_ASSETS.get(relative)
+            if expected_hash is None:
+                violations.append(f"blocked content type: {relative}")
+            elif sha256_file(path) != expected_hash:
+                violations.append(f"allowlisted public asset hash mismatch: {relative}")
         if path.stat().st_size > 2_000_000:
             violations.append(f"tracked file larger than 2 MB: {relative}")
         if path.suffix.lower() not in TEXT_SUFFIXES:

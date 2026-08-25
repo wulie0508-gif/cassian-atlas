@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import re
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -71,10 +74,11 @@ class RepositoryPrivacyTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         forbidden = (
             "胡" + "楠",
-            "C:\\Users\\" + "huawei",
+            "C:\\Users\\" + "sample-user",
             "D:\\" + "".join(chr(code) for code in (0x627E, 0x56DE, 0x7684, 0x6587, 0x4EF6)),
-            "hunan" + "_learning",
+            "hu" + "nan" + "_learning",
         )
+        private_romanization = re.compile("hu" + r"[\s_-]*" + "nan", re.IGNORECASE)
         allowed_suffixes = {".py", ".md", ".json", ".yaml", ".yml", ".toml", ".sql", ".txt", ".js", ".css", ".html", ".svg", ".ps1", ".cmd", ".sh"}
         violations = []
         for path in root.rglob("*"):
@@ -86,23 +90,64 @@ class RepositoryPrivacyTest(unittest.TestCase):
             for token in forbidden:
                 if token in text:
                     violations.append(f"{path.relative_to(root)}: {token}")
+            if private_romanization.search(text):
+                violations.append(f"{path.relative_to(root)}: private learner romanization")
         self.assertEqual(violations, [])
 
     def test_repository_contains_no_private_content_artifacts(self):
         root = Path(__file__).resolve().parents[1]
         blocked = {".sqlite", ".sqlite3", ".db", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".png", ".jpg", ".jpeg", ".wav", ".mp3", ".zip", ".7z", ".rar"}
+        public_binary_assets = {
+            Path("site/assets/social-card.png"): "97a6132b47be9c63836afa6b2d2eb1e9148fc28e9a38807b560a9d78b4a64c7e",
+        }
         violations = []
         for path in root.rglob("*"):
             if not path.is_file() or any(part in {".git", "__pycache__"} or part.endswith(".egg-info") for part in path.parts):
                 continue
             if path.suffix.lower() in blocked:
-                violations.append(str(path.relative_to(root)))
+                relative = path.relative_to(root)
+                expected_hash = public_binary_assets.get(relative)
+                if expected_hash is None:
+                    violations.append(str(relative))
+                elif hashlib.sha256(path.read_bytes()).hexdigest() != expected_hash:
+                    violations.append(f"{relative}: hash mismatch")
         self.assertEqual(violations, [])
 
     def test_json_contracts_are_valid_json(self):
         root = Path(__file__).resolve().parents[1]
         for path in list((root / "schemas").glob("*.json")) + list((root / "examples").glob("*.json")):
             json.loads(path.read_text(encoding="utf-8"))
+
+    def test_agent_and_generation_contracts_keep_explicit_student_ownership(self):
+        root = Path(__file__).resolve().parents[1]
+        schemas = {
+            path.name: json.loads(path.read_text(encoding="utf-8"))
+            for path in (root / "schemas").glob("*.json")
+        }
+
+        event = schemas["agent-run-event.schema.json"]
+        self.assertEqual(set(event["required"]), {"student_id", "event_type"})
+        self.assertIn("idempotency_key", event["properties"])
+        self.assertFalse(event["additionalProperties"])
+
+        generation_start = schemas["artifact-generation-start.schema.json"]
+        self.assertEqual(
+            set(generation_start["required"]),
+            {"student_id", "title", "source_snapshot"},
+        )
+        self.assertEqual(generation_start["properties"]["subject_code"]["default"], "english")
+        self.assertEqual(generation_start["properties"]["artifact_type"]["default"], "courseware")
+
+        generation_update = schemas["artifact-generation-update.schema.json"]
+        self.assertEqual(set(generation_update["required"]), {"student_id", "status"})
+        self.assertFalse(generation_update["additionalProperties"])
+
+    def test_packaging_and_runtime_versions_match(self):
+        root = Path(__file__).resolve().parents[1]
+        project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+        namespace: dict[str, object] = {}
+        exec((root / "src" / "english_tracker" / "__init__.py").read_text(encoding="utf-8"), namespace)
+        self.assertEqual(project["project"]["version"], namespace["__version__"])
 
 
 if __name__ == "__main__":

@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenTutor Learning Router"
+  short_description: "Route tutoring work to the smallest specialist chain"
+  default_prompt: "Use $route-learning-task to route this tutoring request and track its specialist work."

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/open-tutor-ledger/agent-run.schema.json",
+  "title": "Agent route and run registration",
+  "type": "object",
+  "required": ["request_text", "student_id", "subject_code", "source_thread"],
+  "properties": {
+    "request_text": {"type": "string", "minLength": 1, "maxLength": 10000},
+    "student_id": {"type": "string", "minLength": 1, "maxLength": 120},
+    "subject_code": {"type": "string", "minLength": 1, "maxLength": 80},
+    "source_thread": {"type": "string", "minLength": 1, "maxLength": 80},
+    "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 240},
+    "title": {"type": "string", "maxLength": 120},
+    "register": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}

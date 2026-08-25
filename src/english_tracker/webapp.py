@@ -5,13 +5,14 @@ import mimetypes
 import os
 import sqlite3
 import webbrowser
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+from . import __version__
 from .analytics import due_reviews
 from .backup import create_backup
 from .dashboard import (
@@ -21,14 +22,24 @@ from .dashboard import (
     question_bank_summary,
     question_detail,
     search_questions,
+    teacher_dashboard,
     workflow_summary,
 )
-from .db import connect, database_path, require_initialized
+from .db import connect, database_path, migration_status, require_initialized
 from .enrichment import search_knowledge
+from .generation import generation_detail, list_generations, start_generation, update_generation
 from .grammar_catalog import coverage_matrix, passage_coverage, question_knowledge
-from .ingest import import_attempt_diagnostics, import_attempts, import_session
+from .ingest import IngestConflict, import_attempts, import_session
 from .library import library_summary, recent_resources
 from .metrics import trend_report, weekly_report
+from .orchestration import (
+    agent_dashboard,
+    append_run_event,
+    capability_manifest,
+    list_runs,
+    plan_route,
+    register_run,
+)
 from .question_pipeline import (
     search_library_chunks,
     search_staged_questions,
@@ -37,9 +48,16 @@ from .question_pipeline import (
 )
 from .performance import reading_error_taxonomy, reading_passage_performance, session_performance
 from .selection import weighted_set_cover
-from .util import random_id, utc_now
+from .util import utc_now
 from .weights import weight_policy_report, weighted_mastery_report
-from .workspace import app_config, create_student, student_summaries, subject_overview
+from .workflows import record_assessment, record_dictation, record_reading_diagnostics
+from .workspace import (
+    app_config,
+    create_student,
+    require_student_enrollment,
+    student_summaries,
+    subject_overview,
+)
 
 
 QUESTION_BANK_ENV = "ENGLISH_TRACKER_QUESTION_BANK"
@@ -50,25 +68,19 @@ def _json_bytes(value) -> bytes:
     return json.dumps(value, ensure_ascii=False, indent=2, default=str).encode("utf-8")
 
 
-def _iso_from_date(value: str | None) -> str:
-    if not value:
-        return datetime.now().astimezone().isoformat(timespec="seconds")
-    if "T" not in value:
-        return value + "T09:00:00+08:00"
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    return parsed.isoformat(timespec="seconds")
-
-
-def _answer_equal(student: str, standard: str) -> bool:
-    normalize = lambda value: " ".join(value.casefold().strip().split())
-    accepted = [part for part in standard.replace("；", ";").split(";") if part.strip()]
-    return normalize(student) in {normalize(value) for value in accepted or [standard]}
-
-
 class LearningHubServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, handler, *, data_dir: Path, question_bank: Path, library_root: Path, student_id: str):
+    def __init__(
+        self,
+        address,
+        handler,
+        *,
+        data_dir: Path,
+        question_bank: Path,
+        library_root: Path,
+        student_id: str | None,
+    ):
         super().__init__(address, handler)
         self.data_dir = data_dir
         self.db_path = require_initialized(data_dir)
@@ -79,7 +91,7 @@ class LearningHubServer(ThreadingHTTPServer):
 
 class LearningHubHandler(BaseHTTPRequestHandler):
     server: LearningHubServer
-    server_version = "EnglishLearningHub/1.0"
+    server_version = "OpenTutorDashboard/1.0"
 
     def log_message(self, fmt: str, *args) -> None:
         message = f"{self.log_date_time_string()} {self.address_string()} {fmt % args}\n"
@@ -113,19 +125,38 @@ class LearningHubHandler(BaseHTTPRequestHandler):
             raise ValueError("JSON body must be an object")
         return payload
 
-    def _conn(self):
-        return connect(self.server.db_path)
+    def _conn(self, *, readonly: bool = False):
+        return connect(self.server.db_path, readonly=readonly)
 
-    def _selected_student(self, conn, *, query: dict | None = None, body: dict | None = None) -> str:
+    def _selected_student(
+        self,
+        conn,
+        *,
+        query: dict | None = None,
+        body: dict | None = None,
+        allow_server_fallback: bool = True,
+    ) -> str:
         query = query or {}
         body = body or {}
-        requested = (
-            body.get("student_id")
-            or self.headers.get("X-Student-ID")
-            or query.get("student_id", [None])[0]
-            or self.server.student_id
-        )
-        student_id = str(requested).strip()
+        candidates: list[tuple[str, str]] = []
+        if body.get("student_id") is not None and str(body.get("student_id")).strip():
+            candidates.append(("JSON body", str(body["student_id"]).strip().upper()))
+        header_student = self.headers.get("X-Student-ID")
+        if header_student and header_student.strip():
+            candidates.append(("X-Student-ID header", header_student.strip().upper()))
+        for query_student in query.get("student_id", []):
+            if query_student and str(query_student).strip():
+                candidates.append(("student_id query parameter", str(query_student).strip().upper()))
+        distinct = {value for _, value in candidates}
+        if len(distinct) > 1:
+            sources = ", ".join(f"{source}={value}" for source, value in candidates)
+            raise ValueError(f"Conflicting student_id values: {sources}")
+        requested = candidates[0][1] if candidates else None
+        if not requested and allow_server_fallback and self.server.student_id:
+            requested = str(self.server.student_id).strip().upper()
+        if not requested:
+            raise ValueError("student_id is required for learner-specific operations")
+        student_id = str(requested).strip().upper()
         if not conn.execute(
             "SELECT 1 FROM students WHERE student_id=? AND active=1",
             (student_id,),
@@ -165,22 +196,106 @@ class LearningHubHandler(BaseHTTPRequestHandler):
             return
         conn = None
         try:
-            conn = self._conn()
-            student_id = self._selected_student(conn, query=query)
+            conn = self._conn(readonly=True)
+            public_endpoints = {
+                "/api/health",
+                "/api/app-config",
+                "/api/students",
+                "/api/agent/capabilities",
+            }
+            student_id = (
+                None
+                if path in public_endpoints
+                else self._selected_student(
+                    conn,
+                    query=query,
+                    allow_server_fallback=not (
+                        path.startswith("/api/generations")
+                        or path == "/api/teacher/dashboard"
+                    ),
+                )
+            )
             if path == "/api/health":
-                integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+                # Health checks run frequently and must stay cheap even when the
+                # learning database contains a large local source index.  The
+                # exhaustive integrity scan remains available through
+                # `opentutor data check` and pre-write backups.
+                database_probe = (
+                    "ok" if conn.execute("SELECT 1").fetchone()[0] == 1 else "attention"
+                )
+                student_count = conn.execute(
+                    "SELECT COUNT(*) FROM students WHERE active=1"
+                ).fetchone()[0]
+                schema_table_exists = bool(
+                    conn.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
+                    ).fetchone()
+                )
+                applied_versions = (
+                    [
+                        row[0]
+                        for row in conn.execute(
+                            "SELECT version FROM schema_migrations ORDER BY version"
+                        )
+                    ]
+                    if schema_table_exists
+                    else []
+                )
+                migration = migration_status(conn)
+                pending_versions = list(migration["pending_versions"])
+                current_version = applied_versions[-1] if applied_versions else None
+                latest_packaged_version = (
+                    sorted(set(applied_versions + pending_versions))[-1]
+                    if applied_versions or pending_versions
+                    else None
+                )
                 self._send_json(
                     {
-                        "status": "ok" if integrity == "ok" else "attention",
+                        "status": (
+                            "ok"
+                            if database_probe == "ok" and migration["status"] == "ready"
+                            else "attention"
+                        ),
+                        "product": "OpenTutor Ledger",
+                        "app_version": __version__,
+                        "process_id": os.getpid(),
+                        "control_plane": "cli",
+                        "dashboard_mode": "read_only",
+                        "frontend_mode": "read_only",
+                        "agent_api_mode": "write_enabled",
+                        "interfaces": {
+                            "frontend": "read_only",
+                            "agent_api": "write_enabled",
+                        },
+                        "schema": {
+                            "status": migration["status"],
+                            "current_version": current_version,
+                            "latest_packaged_version": latest_packaged_version,
+                            "applied_versions": applied_versions,
+                            "pending_versions": pending_versions,
+                            "migration_required": bool(pending_versions),
+                            "checksum_mismatches": migration["checksum_mismatches"],
+                            "unknown_applied_versions": migration["unknown_applied_versions"],
+                        },
+                        "active_student_count": int(student_count),
                         "database": str(self.server.db_path),
                         "question_bank": str(self.server.question_bank),
                         "library_root": str(self.server.library_root),
-                        "integrity_check": integrity,
+                        "database_probe": database_probe,
+                        "database_probe_mode": "SELECT 1",
+                        "integrity_check": "deferred",
+                        "integrity_check_mode": "opentutor data check",
                         "generated_at": utc_now(),
                     }
                 )
             elif path == "/api/app-config":
-                self._send_json(app_config(conn))
+                config = app_config(conn)
+                config["operating_mode"] = {
+                    "control_plane": "cli",
+                    "dashboard": "read_only",
+                    "user_entry": "Codex conversation",
+                }
+                self._send_json(config)
             elif path == "/api/students":
                 self._send_json(student_summaries(conn))
             elif path == "/api/subject-overview":
@@ -197,6 +312,15 @@ class LearningHubHandler(BaseHTTPRequestHandler):
                 )
             elif path == "/api/home":
                 self._send_json(low_friction_summary(conn, student_id))
+            elif path == "/api/teacher/dashboard":
+                self._send_json(
+                    teacher_dashboard(
+                        conn,
+                        student_id,
+                        subject_code=query.get("subject_code", ["english"])[0],
+                        as_of=query.get("as_of", [None])[0],
+                    )
+                )
             elif path == "/api/question-bank":
                 self._send_json(question_bank_summary(self.server.question_bank))
             elif path == "/api/questions":
@@ -295,7 +419,41 @@ class LearningHubHandler(BaseHTTPRequestHandler):
                     )
                 )
             elif path == "/api/workflow":
-                self._send_json(workflow_summary(conn))
+                self._send_json(workflow_summary(conn, student_id=student_id))
+            elif path == "/api/agent/capabilities":
+                self._send_json(capability_manifest())
+            elif path == "/api/agent/dashboard":
+                self._send_json(
+                    agent_dashboard(
+                        conn,
+                        student_id=student_id,
+                        limit=int(query.get("limit", ["12"])[0]),
+                    )
+                )
+            elif path == "/api/agent/runs":
+                self._send_json(
+                    list_runs(
+                        conn,
+                        student_id=student_id,
+                        status=query.get("status", [None])[0],
+                        limit=int(query.get("limit", ["30"])[0]),
+                    )
+                )
+            elif path == "/api/generations":
+                self._send_json(
+                    list_generations(
+                        conn,
+                        student_id=student_id,
+                        limit=int(query.get("limit", ["30"])[0]),
+                    )
+                )
+            elif path.startswith("/api/generations/"):
+                generation_id = path.removeprefix("/api/generations/").strip("/")
+                if not generation_id or "/" in generation_id:
+                    raise ValueError("generation_id is required")
+                self._send_json(
+                    generation_detail(conn, generation_id, student_id=student_id)
+                )
             elif path.startswith("/api/context/"):
                 audience = path.rsplit("/", 1)[-1]
                 self._send_json(
@@ -348,7 +506,7 @@ class LearningHubHandler(BaseHTTPRequestHandler):
                 self._send_json({"generated_at": utc_now(), "plan_size": due["count"], "items": due["items"]})
             else:
                 self._error(404, "API endpoint not found")
-        except (ValueError, KeyError, sqlite3.Error) as exc:
+        except (ValueError, KeyError, IngestConflict, sqlite3.Error) as exc:
             self._error(400, str(exc))
         except Exception as exc:  # pragma: no cover - defensive local server boundary
             self._error(500, str(exc))
@@ -359,6 +517,7 @@ class LearningHubHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
+        query = parse_qs(parsed.query)
         conn = None
         try:
             body = self._body()
@@ -368,40 +527,99 @@ class LearningHubHandler(BaseHTTPRequestHandler):
                 result = create_student(conn, body)
                 self._send_json({"status": "created", "student": result, "backup": str(backup) if backup else None}, 201)
                 return
-            student_id = self._selected_student(conn, body=body)
-            if path == "/api/assessments":
-                session_id = random_id("SES")
-                event_id = random_id("EVT")
-                started_at = _iso_from_date(body.get("date") or body.get("started_at"))
-                raw_score = float(body["raw_score"]) if body.get("raw_score") not in {None, ""} else None
-                max_score = float(body["max_score"]) if body.get("max_score") not in {None, ""} else None
-                payload = {
-                    "event_id": event_id,
-                    "idempotency_key": f"web:assessment:{session_id}:v1",
-                    "source_thread": "manual",
-                    "student_id": student_id,
-                    "session": {
-                        "session_id": session_id,
-                        "session_type": body.get("assessment_kind", "topic_quiz"),
-                        "title": body.get("title") or "线下测试",
-                        "started_at": started_at,
-                        "ended_at": body.get("ended_at"),
-                        "timezone": "Asia/Shanghai",
+            student_id = self._selected_student(
+                conn,
+                query=query,
+                body=body,
+                allow_server_fallback=False,
+            )
+            if path == "/api/sessions":
+                payload = dict(body)
+                payload["student_id"] = student_id
+                backup = create_backup(self.server.db_path, self.server.data_dir / "backups", "web-session")
+                self._send_json(
+                    {
+                        "result": import_session(conn, payload, backup_path=str(backup) if backup else None),
+                        "backup": str(backup) if backup else None,
                     },
-                    "assessment": {
-                        "assessment_kind": body.get("assessment_kind", "topic_quiz"),
-                        "reporting_series": body.get("reporting_series") or body.get("assessment_kind", "topic_quiz"),
-                        "delivery_mode": body.get("delivery_mode", "offline_closed"),
-                        "raw_score": raw_score,
-                        "max_score": max_score,
-                        "duration_seconds": int(body["duration_seconds"]) if body.get("duration_seconds") not in {None, ""} else None,
-                        "blank_count": int(body["blank_count"]) if body.get("blank_count") not in {None, ""} else None,
-                        "validation_status": "verified",
-                    },
-                }
+                    201,
+                )
+            elif path == "/api/agent/route":
+                request_text = str(body.get("request_text") or "").strip()
+                subject_code = str(body.get("subject_code") or "english").strip().lower()
+                student_id, subject_code = require_student_enrollment(
+                    conn, student_id, subject_code
+                )
+                if body.get("register"):
+                    payload = dict(body)
+                    payload["student_id"] = student_id
+                    payload["subject_code"] = subject_code
+                    self._send_json(register_run(conn, payload), 201)
+                else:
+                    self._send_json(
+                        plan_route(
+                            request_text,
+                            student_id=student_id,
+                            subject_code=subject_code,
+                        )
+                    )
+            elif path == "/api/agent/runs":
+                payload = dict(body)
+                payload["student_id"] = student_id
+                self._send_json(register_run(conn, payload), 201)
+            elif path.startswith("/api/agent/runs/") and path.endswith("/events"):
+                run_id = path.removeprefix("/api/agent/runs/").removesuffix("/events").strip("/")
+                if not run_id:
+                    raise ValueError("run_id is required")
+                payload = dict(body)
+                payload["student_id"] = student_id
+                self._send_json(append_run_event(conn, run_id, payload))
+            elif path == "/api/generations":
+                payload = dict(body)
+                payload["student_id"] = student_id
+                backup = create_backup(
+                    self.server.db_path,
+                    self.server.data_dir / "backups",
+                    "generation-start",
+                )
+                result = start_generation(conn, payload)
+                self._send_json(
+                    {"result": result, "backup": str(backup) if backup else None},
+                    201 if result["status"] == "created" else 200,
+                )
+            elif path.startswith("/api/generations/"):
+                generation_id = path.removeprefix("/api/generations/").strip("/")
+                if not generation_id or "/" in generation_id:
+                    raise ValueError("generation_id is required")
+                payload = dict(body)
+                payload.pop("student_id", None)
+                backup = create_backup(
+                    self.server.db_path,
+                    self.server.data_dir / "backups",
+                    "generation-update",
+                )
+                result = update_generation(
+                    conn,
+                    generation_id,
+                    payload,
+                    student_id=student_id,
+                )
+                self._send_json(
+                    {"result": result, "backup": str(backup) if backup else None}
+                )
+            elif path == "/api/assessments":
+                payload = dict(body)
+                payload["student_id"] = student_id
                 backup = create_backup(self.server.db_path, self.server.data_dir / "backups", "web-assessment")
-                result = import_session(conn, payload, backup_path=str(backup) if backup else None)
-                self._send_json({"status": "created", "session_id": session_id, "result": result}, 201)
+                result = record_assessment(
+                    conn,
+                    payload,
+                    backup_path=str(backup) if backup else None,
+                )
+                self._send_json(
+                    {"result": result, "backup": str(backup) if backup else None},
+                    201 if result["status"] == "applied" else 200,
+                )
             elif path == "/api/grammar/select-passages":
                 target_codes = body.get("target_codes")
                 if not isinstance(target_codes, list) or not target_codes:
@@ -409,117 +627,49 @@ class LearningHubHandler(BaseHTTPRequestHandler):
                 result = weighted_set_cover(
                     conn,
                     target_codes,
-                    student_id=body.get("student_id", student_id),
+                    student_id=student_id,
                     recent_error_days=int(body.get("recent_error_days", 30)),
                     max_passages=int(body.get("max_passages", 5)),
                     as_of=body.get("as_of"),
+                    exclude_passage_ids=body.get("exclude_passage_ids") or [],
                 )
                 self._send_json(result)
             elif path == "/api/classroom/attempts":
                 payload = dict(body)
                 payload.setdefault("source_thread", "courseware")
-                payload.setdefault("student_id", student_id)
+                payload["student_id"] = student_id
                 backup = create_backup(self.server.db_path, self.server.data_dir / "backups", "web-classroom-attempts")
                 result = import_attempts(conn, payload, backup_path=str(backup) if backup else None)
                 self._send_json({"status": "created", "result": result}, 201)
             elif path == "/api/reading/diagnostics":
                 payload = dict(body)
-                payload.setdefault("event_id", random_id("EVT"))
-                payload.setdefault("idempotency_key", f"web:reading-diagnostics:{payload['event_id']}:v1")
-                payload.setdefault("source_thread", "courseware")
-                payload.setdefault("student_id", student_id)
+                payload["student_id"] = student_id
                 backup = create_backup(self.server.db_path, self.server.data_dir / "backups", "web-reading-diagnostics")
-                result = import_attempt_diagnostics(conn, payload, backup_path=str(backup) if backup else None)
-                self._send_json({"status": "created", "result": result}, 201)
-            elif path == "/api/dictation/results":
-                items = body.get("items")
-                if not isinstance(items, list) or not items:
-                    raise ValueError("items must be a non-empty array")
-                session_id = random_id("SES")
-                started_at = _iso_from_date(body.get("date") or body.get("started_at"))
-                session_event = random_id("EVT")
-                correct = 0
-                attempts = []
-                for item in items:
-                    item_id = item.get("item_id")
-                    if not item_id:
-                        raise ValueError("Every dictation item requires item_id")
-                    source = conn.execute("SELECT answer_snapshot FROM content_items WHERE item_id=? AND record_status='active'", (item_id,)).fetchone()
-                    if not source:
-                        raise ValueError(f"Unknown active content item: {item_id}")
-                    answer = item.get("student_answer")
-                    answer_text = "" if answer is None else str(answer)
-                    standard = source["answer_snapshot"] or ""
-                    is_correct = _answer_equal(answer_text, standard)
-                    correct += is_correct
-                    attempts.append(
-                        {
-                            "event_id": random_id("ATT"),
-                            "item_id": item_id,
-                            "attempted_at": started_at,
-                            "student_answer": answer_text,
-                            "standard_answer": standard,
-                            "answer_capture_status": "captured_blank" if answer_text == "" else "captured",
-                            "attempt_phase": "review",
-                            "response_mode": "active_recall",
-                            "validation_status": "verified",
-                            "evaluation": {
-                                "result": "correct" if is_correct else "wrong",
-                                "score": 1 if is_correct else 0,
-                                "max_score": 1,
-                                "evaluated_by": "local_exact_match",
-                            },
-                            "error_types": [],
-                        }
-                    )
-                session_payload = {
-                    "event_id": session_event,
-                    "idempotency_key": f"web:dictation:{session_id}:session:v1",
-                    "source_thread": "dictation",
-                    "student_id": student_id,
-                    "session": {
-                        "session_id": session_id,
-                        "session_type": "dictation",
-                        "title": body.get("title") or "本地听写",
-                        "started_at": started_at,
-                        "timezone": "Asia/Shanghai",
-                    },
-                    "assessment": {
-                        "assessment_kind": "dictation",
-                        "reporting_series": body.get("reporting_series") or "weekly_dictation",
-                        "delivery_mode": body.get("delivery_mode", "offline_closed"),
-                        "raw_score": correct,
-                        "max_score": len(attempts),
-                        "blank_count": sum(attempt["answer_capture_status"] == "captured_blank" for attempt in attempts),
-                        "validation_status": "verified",
-                    },
-                }
-                attempts_event = random_id("EVT")
-                attempts_payload = {
-                    "event_id": attempts_event,
-                    "idempotency_key": f"web:dictation:{session_id}:attempts:v1",
-                    "source_thread": "dictation",
-                    "student_id": student_id,
-                    "session_id": session_id,
-                    "attempts": attempts,
-                }
-                backup = create_backup(self.server.db_path, self.server.data_dir / "backups", "web-dictation")
-                session_result = import_session(conn, session_payload, backup_path=str(backup) if backup else None)
-                attempts_result = import_attempts(conn, attempts_payload, backup_path=str(backup) if backup else None)
+                result = record_reading_diagnostics(
+                    conn,
+                    payload,
+                    backup_path=str(backup) if backup else None,
+                )
                 self._send_json(
-                    {
-                        "status": "created",
-                        "session_id": session_id,
-                        "correct": correct,
-                        "total": len(attempts),
-                        "session_result": session_result,
-                        "attempts_result": attempts_result,
-                    },
-                    201,
+                    {"result": result, "backup": str(backup) if backup else None},
+                    201 if result["status"] == "applied" else 200,
+                )
+            elif path == "/api/dictation/results":
+                payload = dict(body)
+                payload["student_id"] = student_id
+                backup = create_backup(self.server.db_path, self.server.data_dir / "backups", "web-dictation")
+                result = record_dictation(
+                    conn,
+                    payload,
+                    backup_path=str(backup) if backup else None,
+                )
+                self._send_json(
+                    {"result": result, "backup": str(backup) if backup else None},
+                    201 if result["status"] == "created" else 200,
                 )
             else:
                 self._error(404, "API endpoint not found")
-        except (ValueError, KeyError, sqlite3.Error, json.JSONDecodeError) as exc:
+        except (ValueError, KeyError, IngestConflict, sqlite3.Error, json.JSONDecodeError) as exc:
             self._error(400, str(exc))
         except Exception as exc:  # pragma: no cover
             self._error(500, str(exc))
@@ -533,7 +683,7 @@ def serve(
     *,
     question_bank: str | Path,
     library_root: str | Path,
-    student_id: str = "STU-001",
+    student_id: str | None = None,
     host: str = "127.0.0.1",
     port: int = 8788,
     open_browser: bool = False,
@@ -553,25 +703,6 @@ def serve(
         library_root=library_path,
         student_id=student_id,
     )
-    with connect(server.db_path) as conn:
-        conn.execute(
-            """
-            UPDATE project_work_items
-            SET status='completed',completed_units=1,total_units=1,
-                evidence_path='http://127.0.0.1:8788',blocker=NULL,updated_at=?
-            WHERE work_item_id='WORK-LOCAL-HUB'
-            """,
-            (utc_now(),),
-        )
-        conn.execute(
-            """
-            UPDATE project_work_items
-            SET status='completed',completed_units=1,total_units=1,
-                evidence_path='/api/contracts/dictation-ocr',blocker=NULL,updated_at=?
-            WHERE work_item_id='WORK-OCR-INTEGRATION'
-            """,
-            (utc_now(),),
-        )
     url = f"http://{host}:{port}"
     print(json.dumps({"status": "serving", "url": url, "database": str(database_path(data_path))}, ensure_ascii=False))
     if open_browser:

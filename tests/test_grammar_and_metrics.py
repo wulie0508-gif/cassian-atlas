@@ -79,6 +79,16 @@ class GrammarCoverageAndMetricsTest(unittest.TestCase):
         self.assertEqual(len(selection["selected_passages"]), 2)
         self.assertEqual(selection["uncovered"], [])
 
+        new_only = weighted_set_cover(
+            self.conn,
+            ["tense", "noun_clause"],
+            max_passages=2,
+            exclude_passage_ids=["PAS-DEMO-1"],
+        )
+        self.assertEqual([row["passage_id"] for row in new_only["selected_passages"]], ["PAS-DEMO-2"])
+        self.assertEqual(new_only["excluded_passage_ids"], ["PAS-DEMO-1"])
+        self.assertEqual(new_only["uncovered"], ["tense"])
+
         snapshot = synced["source_snapshot_id"]
         noun_id = self.conn.execute("SELECT knowledge_point_id FROM knowledge_points WHERE code='noun_clause'").fetchone()[0]
         with self.assertRaises(sqlite3.IntegrityError):

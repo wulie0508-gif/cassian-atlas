@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/open-tutor-ledger/agent-run-event.schema.json",
+  "title": "Agent run event",
+  "type": "object",
+  "required": ["student_id", "event_type"],
+  "properties": {
+    "student_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "description": "Explicit owner of the run. It must match the student_id stored on the target run."
+    },
+    "event_type": {
+      "enum": ["started", "progress", "needs_input", "completed", "failed", "cancelled"]
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "description": "Globally unique retry key for one logical run event."
+    },
+    "capability_key": {"type": "string", "minLength": 1, "maxLength": 80},
+    "actor": {"type": "string", "minLength": 1, "maxLength": 80},
+    "message": {"type": "string", "minLength": 1, "maxLength": 1000},
+    "summary": {"type": "string", "maxLength": 2000},
+    "result_ref": {"type": "string", "maxLength": 500},
+    "details": {}
+  },
+  "additionalProperties": false
+}

@@ -21,6 +21,12 @@
 17. Multiple learners use one normalized store but every performance query and write resolves an explicit `student_id`.
 18. Subject registration is generic. English owns a specialized adapter; other subjects can record evidence without inheriting English question-bank assumptions.
 19. Interface locale is presentation state only. Switching Chinese/English never mutates evidence facts.
+20. Agent orchestration is a thin deterministic layer. It selects the smallest specialist skill chain and never reimplements specialist calculations.
+21. Operational run metadata is separated from learning evidence. Dashboard status cannot become a score, attempt, diagnosis, mastery signal, or review task.
+22. Specialist skills are independently installable and progressively disclose only their own API contract. The former monolithic learning-hub skill remains only as a compatibility alias to the router.
+23. Ordinary commands and server startup fail closed when packaged migrations are pending. `opentutor upgrade` is the explicit, checked-backup schema operation; `init` and `upgrade` never create a learner.
+24. The website is a read-only projection. Codex operates the system through the `opentutor` control plane and audited specialist contracts.
+25. Generated materials have a learner-owned lifecycle with an immutable source snapshot, output hash, and staleness state. New evidence never silently leaves an old output marked current.
 
 ## Risks and controls
 
@@ -41,3 +47,8 @@
 | Machine-split source material mistaken for verified questions | Unreliable lessons and analytics | separate staging tables, visible review queue, verification boundary and SQL guards |
 | Audio indexing reported as transcription | False completeness claim | separate resource state, counts and interface labels |
 | Multiple conversations write SQLite directly | corruption and conflicting semantics | idempotent CLI/HTTP import contracts and automatic backups |
+| Router becomes another monolith | slow context loading and duplicate calculations | deterministic route manifest plus independently loadable specialist skills |
+| Dashboard status contaminates learning analytics | false scores or mastery | separate `agent_runs` tables with no evidence-table write path |
+| A code update starts against an old schema | runtime failures or partial writes | read-only pending-migration check, fail closed, then explicit checked-backup `opentutor upgrade` |
+| A dashboard selection becomes an implicit write target | cross-learner evidence contamination | read-only browser plus explicit `student_id` on every CLI and specialist write |
+| Generated material outlives its evidence snapshot unnoticed | stale lesson or assessment content | source snapshot hash, output hash and automatic stale marking when new evidence arrives |

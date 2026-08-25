@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/open-tutor-ledger/artifact-generation-update.schema.json",
+  "title": "Codex artifact generation update",
+  "type": "object",
+  "required": ["student_id", "status"],
+  "properties": {
+    "student_id": {"type": "string", "minLength": 1, "maxLength": 120},
+    "status": {"enum": ["in_progress", "completed", "failed", "cancelled"]},
+    "source_snapshot_sha256": {"type": "string", "pattern": "^[A-Fa-f0-9]{64}$"},
+    "output_artifact_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 120},
+    "output_path": {"type": ["string", "null"], "minLength": 1, "maxLength": 2000},
+    "output_sha256": {"type": ["string", "null"], "pattern": "^[A-Fa-f0-9]{64}$"},
+    "summary": {"type": ["string", "null"], "maxLength": 2000}
+  },
+  "additionalProperties": false
+}

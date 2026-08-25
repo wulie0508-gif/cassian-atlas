@@ -79,9 +79,11 @@ def weighted_set_cover(
     max_passages: int = 5,
     as_of: str | None = None,
     snapshot_id: str | None = None,
+    exclude_passage_ids: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     snapshot_id = snapshot_id or current_snapshot_id(conn)
     target_codes = list(dict.fromkeys(target_codes))
+    excluded_passages = set(exclude_passage_ids or ())
     if not target_codes:
         raise ValueError("At least one target knowledge-point code is required.")
     if max_passages < 1:
@@ -124,6 +126,8 @@ def weighted_set_cover(
     )
     candidates: dict[str, dict[str, Any]] = {}
     for row in point_rows:
+        if row["passage_id"] in excluded_passages:
+            continue
         if row["code"] not in weights:
             continue
         candidate = candidates.setdefault(
@@ -192,6 +196,7 @@ def weighted_set_cover(
         "algorithm": "weighted-greedy-set-cover-v1",
         "source_snapshot_id": snapshot_id,
         "candidate_rule": "Only complete source_checked passages; a passage is always selected as a whole.",
+        "excluded_passage_ids": sorted(excluded_passages),
         "requested_knowledge_points": target_codes,
         "recent_error_window": {"student_id": student_id, "days": recent_error_days, "start": start.isoformat(), "end": end.isoformat()},
         "recent_error_evidence": recent_evidence,

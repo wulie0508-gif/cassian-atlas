@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/open-tutor-ledger/artifact-generation-start.schema.json",
+  "title": "Codex artifact generation start",
+  "type": "object",
+  "required": ["student_id", "title", "source_snapshot"],
+  "properties": {
+    "generation_id": {"type": "string", "minLength": 1, "maxLength": 120},
+    "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 240},
+    "student_id": {"type": "string", "minLength": 1, "maxLength": 120},
+    "subject_code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "default": "english",
+      "description": "Active learner enrollment used for this generation."
+    },
+    "artifact_type": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "default": "courseware",
+      "description": "Durable artifact category produced by this generation."
+    },
+    "title": {"type": "string", "minLength": 1, "maxLength": 240},
+    "source_snapshot": {"type": "object"},
+    "skill_name": {"type": ["string", "null"], "maxLength": 120},
+    "skill_version": {"type": ["string", "null"], "maxLength": 80},
+    "prompt_version": {"type": ["string", "null"], "maxLength": 80},
+    "model_name": {"type": ["string", "null"], "maxLength": 120}
+  },
+  "additionalProperties": false
+}

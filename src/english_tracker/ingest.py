@@ -10,6 +10,7 @@ from .contracts import (
     validate_progress_payload,
     validate_session_payload,
 )
+from .generation import mark_completed_generations_stale
 from .util import canonical_json, normalize_alias, payload_hash, random_id, stable_id, utc_now
 
 
@@ -112,17 +113,23 @@ def import_session(conn, payload: dict, *, backup_path: str | None = None) -> di
         now = utc_now()
         artifact_id = None
         if artifact:
-            artifact_id = artifact.get("artifact_id") or stable_id("ART", artifact.get("title"), session["started_at"])
+            artifact_id = artifact.get("artifact_id") or stable_id(
+                "ART",
+                payload["student_id"],
+                artifact.get("title"),
+                session["started_at"],
+            )
             conn.execute(
                 """
                 INSERT INTO artifacts(
-                  artifact_id, artifact_type, title, material_date, private_path,
+                  artifact_id, student_id, artifact_type, title, material_date, private_path,
                   external_uri, content_sha256, verification_status,
                   created_by_event_id, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     artifact_id,
+                    payload["student_id"],
                     artifact.get("artifact_type", "material"),
                     artifact["title"],
                     artifact.get("material_date"),
@@ -211,6 +218,7 @@ def import_session(conn, payload: dict, *, backup_path: str | None = None) -> di
         )
         total = 1 + bool(artifact) + bool(assessment) + len(observations) + len(progress)
         _finish_event(conn, event_id, total, 1 + int(bool(artifact)) + int(bool(assessment)) + len(observations) + inserted_progress)
+        mark_completed_generations_stale(conn, student_id=payload["student_id"])
     return {"status": "applied", "event_id": event_id, "session_id": session["session_id"]}
 
 
@@ -261,6 +269,7 @@ def import_progress(conn, payload: dict, *, backup_path: str | None = None) -> d
             raise IngestConflict("session_id is missing, inactive, or belongs to another student")
         count = _insert_progress_rows(conn, event_id, payload["session_id"], payload["progress"], utc_now())
         _finish_event(conn, event_id, len(payload["progress"]), count)
+        mark_completed_generations_stale(conn, student_id=payload["student_id"])
     return {"status": "applied", "event_id": event_id, "rows_inserted": count}
 
 
@@ -665,6 +674,7 @@ def import_attempts(conn, payload: dict, *, backup_path: str | None = None) -> d
             len(payload["attempts"]),
             inserted_attempts,
         )
+        mark_completed_generations_stale(conn, student_id=payload["student_id"])
     return {
         "status": "applied",
         "event_id": ingest_event_id,
@@ -801,6 +811,8 @@ def import_attempt_diagnostics(conn, payload: dict, *, backup_path: str | None =
                     ),
                 )
         _finish_event(conn, ingest_event_id, sum(len(row["error_types"]) for row in payload["diagnostics"]), inserted + updated, skipped)
+        if inserted + updated:
+            mark_completed_generations_stale(conn, student_id=payload["student_id"])
     return {
         "status": "applied",
         "event_id": ingest_event_id,

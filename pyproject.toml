@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "open-tutor-ledger"
-version = "0.2.0"
+version = "0.4.0"
 description = "Local-first, agent-ready learning evidence for multiple learners and subjects."
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
-authors = [{name = "English Learning Tracker contributors"}]
+authors = [{name = "OpenTutor Ledger contributors"}]
 dependencies = []
 keywords = ["learning-records", "education", "sqlite", "ai-agents", "spaced-repetition", "knowledge-tracing"]
 classifiers = [
@@ -25,6 +25,7 @@ parsing = [
 ]
 
 [project.scripts]
+opentutor = "english_tracker.cli:main"
 english-tracker = "english_tracker.cli:main"
 open-tutor-ledger = "english_tracker.cli:main"
 

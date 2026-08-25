@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from hashlib import sha256
 from importlib import resources
 from pathlib import Path
+from typing import Any
 
 from .util import utc_now
 
@@ -14,6 +16,14 @@ DB_NAME_ENV = "ENGLISH_TRACKER_DB_NAME"
 
 class ConfigurationError(RuntimeError):
     pass
+
+
+class MigrationStateError(RuntimeError):
+    """Raised when packaged migrations cannot be safely reconciled with a database."""
+
+
+class MigrationChecksumMismatch(MigrationStateError):
+    """Raised when an applied migration no longer matches its packaged SQL."""
 
 
 def resolve_data_dir(explicit: str | Path | None = None) -> Path:
@@ -70,29 +80,163 @@ def _migration_files() -> list:
     return sorted((item for item in root.iterdir() if item.name.endswith(".sql")), key=lambda x: x.name)
 
 
-def apply_migrations(conn: sqlite3.Connection) -> list[str]:
+def _migration_manifest() -> list[dict[str, str]]:
+    manifest: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for resource in _migration_files():
+        version = resource.name.split("_", 1)[0]
+        if version in seen:
+            raise MigrationStateError(f"Duplicate packaged migration version: {version}")
+        seen.add(version)
+        sql = resource.read_text(encoding="utf-8")
+        manifest.append(
+            {
+                "version": version,
+                "filename": resource.name,
+                "checksum_sha256": sha256(sql.encode("utf-8")).hexdigest(),
+                "sql": sql,
+            }
+        )
+    return manifest
+
+
+def _schema_migrations_exists(conn: sqlite3.Connection) -> bool:
+    return bool(
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
+        ).fetchone()
+    )
+
+
+def _schema_migrations_has_checksum(conn: sqlite3.Connection) -> bool:
+    if not _schema_migrations_exists(conn):
+        return False
+    return any(row[1] == "checksum_sha256" for row in conn.execute("PRAGMA table_info(schema_migrations)"))
+
+
+def migration_status(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Return a read-only migration state with explicit pending and mismatch evidence."""
+    manifest = _migration_manifest()
+    packaged = {row["version"]: row for row in manifest}
+    table_exists = _schema_migrations_exists(conn)
+    checksum_available = _schema_migrations_has_checksum(conn)
+    if not table_exists:
+        applied: dict[str, str | None] = {}
+    elif checksum_available:
+        applied = {
+            str(row["version"]): row["checksum_sha256"]
+            for row in conn.execute(
+                "SELECT version, checksum_sha256 FROM schema_migrations ORDER BY version"
+            )
+        }
+    else:
+        applied = {
+            str(row["version"]): None
+            for row in conn.execute("SELECT version FROM schema_migrations ORDER BY version")
+        }
+
+    pending = [row["version"] for row in manifest if row["version"] not in applied]
+    missing_checksums = [
+        version for version, checksum in applied.items()
+        if version in packaged and not checksum
+    ]
+    mismatches = [
+        {
+            "version": version,
+            "expected_sha256": packaged[version]["checksum_sha256"],
+            "actual_sha256": checksum,
+        }
+        for version, checksum in applied.items()
+        if version in packaged and checksum and checksum != packaged[version]["checksum_sha256"]
+    ]
+    unknown_applied = sorted(version for version in applied if version not in packaged)
+    if mismatches or unknown_applied or (checksum_available and missing_checksums):
+        state = "mismatch"
+    elif pending:
+        state = "pending"
+    elif missing_checksums:
+        state = "checksum_uninitialized"
+    else:
+        state = "ready"
+    return {
+        "status": state,
+        "pending_versions": pending,
+        "checksum_mismatches": mismatches,
+        "missing_checksums": missing_checksums,
+        "unknown_applied_versions": unknown_applied,
+        "checksum_storage": "available" if checksum_available else "uninitialized",
+    }
+
+
+def pending_migration_versions(conn: sqlite3.Connection) -> list[str]:
+    """Return packaged migration versions that have not been applied yet.
+
+    This check is intentionally read-only.  Callers can decide whether a
+    backup is needed before applying the returned migrations.
+    """
+    return list(migration_status(conn)["pending_versions"])
+
+
+def _prepare_schema_migrations(conn: sqlite3.Connection) -> None:
+    table_existed = _schema_migrations_exists(conn)
+    checksum_existed = _schema_migrations_has_checksum(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS schema_migrations (
             version TEXT PRIMARY KEY,
-            applied_at TEXT NOT NULL
+            applied_at TEXT NOT NULL,
+            checksum_sha256 TEXT NOT NULL
         )
         """
     )
+    legacy_without_checksum = table_existed and not checksum_existed
+    if legacy_without_checksum:
+        conn.execute("ALTER TABLE schema_migrations ADD COLUMN checksum_sha256 TEXT")
+        packaged = {row["version"]: row["checksum_sha256"] for row in _migration_manifest()}
+        for row in conn.execute(
+            "SELECT version FROM schema_migrations WHERE checksum_sha256 IS NULL OR checksum_sha256=''"
+        ):
+            checksum = packaged.get(str(row["version"]))
+            if checksum:
+                conn.execute(
+                    "UPDATE schema_migrations SET checksum_sha256=? WHERE version=?",
+                    (checksum, row["version"]),
+                )
     conn.commit()
-    applied = {row[0] for row in conn.execute("SELECT version FROM schema_migrations")}
+
+
+def apply_migrations(conn: sqlite3.Connection) -> list[str]:
+    _prepare_schema_migrations(conn)
+    status = migration_status(conn)
+    if status["checksum_mismatches"] or status["missing_checksums"]:
+        versions = ", ".join(
+            [row["version"] for row in status["checksum_mismatches"]]
+            + list(status["missing_checksums"])
+        )
+        raise MigrationChecksumMismatch(
+            f"Applied migration checksum mismatch for version(s): {versions}. "
+            "Restore the matching package or a verified database backup before continuing."
+        )
+    if status["unknown_applied_versions"]:
+        versions = ", ".join(status["unknown_applied_versions"])
+        raise MigrationStateError(
+            f"Database contains migration version(s) unavailable in this package: {versions}"
+        )
+    pending = set(status["pending_versions"])
     newly_applied: list[str] = []
-    for resource in _migration_files():
-        version = resource.name.split("_", 1)[0]
-        if version in applied:
+    for migration in _migration_manifest():
+        version = migration["version"]
+        if version not in pending:
             continue
-        sql = resource.read_text(encoding="utf-8")
+        sql = migration["sql"]
         version_escaped = version.replace("'", "''")
         now_escaped = utc_now().replace("'", "''")
+        checksum_escaped = migration["checksum_sha256"].replace("'", "''")
         script = (
             "BEGIN IMMEDIATE;\n"
             + sql
-            + f"\nINSERT INTO schema_migrations(version, applied_at) VALUES ('{version_escaped}', '{now_escaped}');\n"
+            + "\nINSERT INTO schema_migrations(version, applied_at, checksum_sha256) "
+            + f"VALUES ('{version_escaped}', '{now_escaped}', '{checksum_escaped}');\n"
             + "COMMIT;"
         )
         try:
@@ -108,7 +252,7 @@ def apply_migrations(conn: sqlite3.Connection) -> list[str]:
 def initialize_database(
     data_dir: Path,
     *,
-    student_id: str = "STU-001",
+    student_id: str,
     display_name: str | None = None,
 ) -> dict[str, object]:
     ensure_private_layout(data_dir)

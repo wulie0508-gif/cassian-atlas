@@ -1,0 +1,7 @@
+interface:
+  display_name: "Learning Hub (Compatibility)"
+  short_description: "Route legacy hub requests to specialist skills"
+  default_prompt: "Use $use-learning-hub to route this legacy hub request to the correct specialist skill."
+
+policy:
+  allow_implicit_invocation: false

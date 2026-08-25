@@ -2,7 +2,7 @@
 
 ## Decision summary
 
-The system uses an event-ingestion boundary in front of a normalized SQLite learning-record store. Other conversations send versioned JSON; they never write SQL or migrations. Attempt facts are immutable. Corrections append a replacement import and void the old event while retaining audit evidence.
+The system uses a thin deterministic router in front of independent specialist skills and an event-ingestion boundary in front of a normalized SQLite learning-record store. Other conversations submit a task once; the router returns the smallest ordered skill chain. Specialists send versioned JSON and never write SQL or migrations. Attempt facts are immutable. Corrections append a replacement import and void the old event while retaining audit evidence.
 
 External question and vocabulary databases remain read-only. `external_references` links used items to stable IDs. `content_items` keeps only the prompt/answer snapshot needed to interpret a historical attempt even if an external source later changes.
 
@@ -10,9 +10,21 @@ External question and vocabulary databases remain read-only. `external_reference
 
 ```mermaid
 flowchart LR
-    D["Dictation conversation"] -->|"session / attempts JSON"| CLI["Stable CLI"]
-    C["Courseware conversation"] -->|"query / attempts JSON"| CLI
-    E["Engineering conversation"] -->|"migrate / repair / check"| CLI
+    D["Dictation conversation"] --> RT["Thin router"]
+    C["Courseware conversation"] --> RT
+    E["Engineering conversation"] --> RT
+    RT --> REC["Evidence skill"]
+    RT --> DIA["Diagnosis skill"]
+    RT --> SEL["Selection skill"]
+    RT --> CTX["Courseware-context skill"]
+    RT --> DIC["Dictation skill"]
+    REC --> CLI["Stable HTTP / CLI"]
+    DIA --> CLI
+    SEL --> CLI
+    CTX --> CLI
+    DIC --> CLI
+    RT --> RUN["Agent run ledger"]
+    RUN --> UI["Status dashboard"]
     CLI --> I["Idempotent ingest events"]
     I --> DB[("Private SQLite learning store")]
     DB --> W["Weakness reports"]
@@ -59,7 +71,19 @@ erDiagram
     INGEST_EVENTS ||--o{ ATTEMPTS : creates
     INGEST_EVENTS ||--o{ INGEST_EVENT_ROWS : audits
     INGEST_EVENTS ||--o{ LEGACY_RECORDS : preserves
+    STUDENTS ||--o{ AGENT_RUNS : owns
+    SUBJECTS ||--o{ AGENT_RUNS : scopes
+    AGENT_RUNS ||--o{ AGENT_RUN_EVENTS : records
+    STUDENTS ||--o{ ARTIFACT_GENERATION_RUNS : owns
+    SUBJECTS ||--o{ ARTIFACT_GENERATION_RUNS : scopes
+    ARTIFACTS |o--o{ ARTIFACT_GENERATION_RUNS : may_be_output_of
 ```
+
+## Orchestration boundary
+
+`POST /api/agent/route` performs deterministic intent matching and optionally creates one idempotent `agent_runs` record. The returned `steps` reference independently installed skills. The router only classifies, orders, and consolidates; it does not perform grading, diagnosis, set-cover, or report calculations.
+
+Specialists append start, material progress, and one terminal event through `/api/agent/runs/{run_id}/events`. These rows are operational metadata. They do not join attempts, evaluations, mastery, or review queues and therefore cannot change learner metrics. Independent steps may run in parallel when the host supports subagents; evidence-dependent steps remain sequential.
 
 ## Consistency model
 
@@ -71,6 +95,11 @@ erDiagram
 - Automated imports never overwrite an existing item snapshot or manual review-state override.
 - A `model_suggested` question/item mapping cannot be `source_checked` or `verified`; manual promotion is an explicit later action.
 - `not_captured` attempts cannot carry an active specific error-cause mapping. Historical violations are retained as voided/rejected audit evidence.
+- `agent_runs.idempotency_key` prevents duplicate dashboard tasks; every run begins with an append-only `planned` event and terminal timestamps must match terminal status.
+- `agent_run_events.idempotency_key` is globally unique; exact event retries are safe and conflicting reuse is rejected.
+- Learner ownership for linked sessions, attempts, reviews, artifacts, and generation outputs is enforced in both application code and SQLite triggers.
+- Applied migrations retain the packaged SQL checksum. Ordinary commands, including server start, fail closed while a migration is pending; `opentutor upgrade` makes a checked backup and applies migrations explicitly.
+- Artifact generation records bind an immutable source snapshot to the owning learner. New learning evidence marks prior completed outputs stale without deleting them.
 
 ## Grammar catalog and selection
 
@@ -102,7 +131,7 @@ The score orders investigation; it does not itself establish a diagnosis. The co
 
 ## Privacy and repository boundary
 
-The repository contains no private configuration. Runtime selection uses `ENGLISH_TRACKER_DATA_DIR` and `ENGLISH_TRACKER_DB_NAME` or the global `--data-dir` option. The `.gitignore` excludes common database, backup, export, inbox, document, image, and audio formats.
+The repository contains no private configuration. Runtime discovery uses global `--config`, `OPEN_TUTOR_CONFIG`, or the private default config, with the legacy environment variables as compatibility fallbacks. The `.gitignore` excludes common database, backup, export, inbox, document, image, and audio formats.
 
 Multiple learners share one local schema while every learning fact retains `student_id`. Subjects are registered separately; every content item carries `subject_code`. The English adapter may read an external question bank, while generic subject workspaces can record lessons, assignments, and assessments without bundling source content.
 

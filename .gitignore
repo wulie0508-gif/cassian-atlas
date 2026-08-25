@@ -33,6 +33,7 @@ student-data/
 *.xlsx
 *.xls
 *.png
+!site/assets/social-card.png
 *.jpg
 *.jpeg
 *.wav

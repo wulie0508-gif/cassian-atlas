@@ -69,8 +69,13 @@ The authoritative evidence remains attempts and evaluation revisions. Review sta
 | `question_weight_rules` | One deterministic item/evidence multiplier rule | dimension, match value, multiplier, priority and rationale |
 | `workflow_channels` | One engineering/courseware/dictation contract | read source, write contract, context endpoint, current status |
 | `project_work_items` | One tracked deliverable | owner, status, completed/total units, evidence path and blocker |
+| `agent_runs` | One routed user task | idempotency key, learner/subject scope, request hash/excerpt, selected route JSON, primary capability, status, summary and durable result reference |
+| `agent_run_events` | One append-only operational event within a run | globally unique retry key, sequence, capability, actor, planned/started/progress/terminal event type, message, optional payload and timestamp |
+| `artifact_generation_runs` | One source-bound generated-material lifecycle | learner/subject owner, idempotency key, immutable source snapshot and hash, planned/running/terminal state, output artifact/path/hash, stale reason and timestamps |
 
 The effective attempt weight multiplies assessment environment, question difficulty, verification quality and answer-capture quality, then clamps the product to the published safe range. It never invents extra attempts.
+
+`agent_runs`, `agent_run_events`, and `artifact_generation_runs` are operational metadata only. They support the website's automation dashboard and cross-conversation continuity but are never input rows for accuracy, weakness, mastery, trends, or review scheduling. A new learner-evidence import can mark a completed generation stale; it does not mutate or delete the generated file.
 
 ## Source-library parsing and staging
 
@@ -96,7 +101,7 @@ Staging rows are queryable for discovery but are not attempts and are not the ve
 | `ingest_event_rows` | One entity action caused by an ingest event | entity type/ID, insert/link/supersede/void/skip, before/after JSON |
 | `audit_log` | One operator or system correction action | actor, action, entity, before/after, reason |
 | `legacy_records` | One preserved old row or JSON sub-record | source system, record type/key, raw JSON, target mapping, migration status |
-| `schema_migrations` | One applied SQL migration | version and time |
+| `schema_migrations` | One applied SQL migration | version, applied time and packaged SQL checksum |
 | `passage_selection_runs` | Optional audit record for a materialized selection run | target knowledge JSON, student/error window, algorithm, result JSON |
 
 ## Canonical knowledge-point codes

@@ -307,12 +307,148 @@ def run_quality_checks(conn) -> dict[str, Any]:
         "Every active content item belongs to a registered subject",
         "Register the subject or correct the item through an audited replacement import.",
     )
+    add(
+        "artifact_student_ownership",
+        "critical",
+        _count(
+            conn,
+            """
+            SELECT COUNT(*) FROM artifacts a
+            LEFT JOIN students s ON s.student_id=a.student_id
+            WHERE a.record_status='active'
+              AND (a.student_id IS NULL OR trim(a.student_id)='' OR s.student_id IS NULL)
+            """,
+        ),
+        "Every active artifact has an explicit student owner",
+        "Assign or quarantine ownerless artifacts before using them in a student workspace.",
+    )
+    add(
+        "session_artifact_student_consistency",
+        "critical",
+        _count(
+            conn,
+            """
+            SELECT COUNT(*) FROM learning_sessions ls
+            JOIN artifacts a ON a.artifact_id=ls.artifact_id
+            WHERE ls.artifact_id IS NOT NULL AND ls.student_id IS NOT a.student_id
+            """,
+        ),
+        "A session and its artifact belong to the same student",
+        "Detach the artifact and restore the correct student-owned link through an audited repair.",
+    )
+    add(
+        "attempt_session_student_consistency",
+        "critical",
+        _count(
+            conn,
+            """
+            SELECT COUNT(*) FROM attempts a
+            JOIN learning_sessions ls ON ls.session_id=a.session_id
+            WHERE a.student_id IS NOT ls.student_id
+            """,
+        ),
+        "An attempt and its session belong to the same student",
+        "Quarantine the cross-student attempt and restore it through the correct student session.",
+    )
+    add(
+        "attempt_artifact_student_consistency",
+        "critical",
+        _count(
+            conn,
+            """
+            SELECT COUNT(*) FROM attempts att
+            JOIN artifacts art ON art.artifact_id=att.artifact_id
+            WHERE att.artifact_id IS NOT NULL AND att.student_id IS NOT art.student_id
+            """,
+        ),
+        "An attempt and its artifact belong to the same student",
+        "Remove the cross-student artifact link and re-import against the correct owned artifact.",
+    )
+    add(
+        "review_state_attempt_consistency",
+        "critical",
+        _count(
+            conn,
+            """
+            SELECT COUNT(*) FROM review_state rs
+            JOIN attempts a ON a.attempt_id=rs.last_attempt_id
+            WHERE rs.last_attempt_id IS NOT NULL
+              AND (rs.student_id IS NOT a.student_id OR rs.item_id IS NOT a.item_id)
+            """,
+        ),
+        "Review state points to an attempt for the same student and item",
+        "Rebuild the affected review state from that student's active attempt history.",
+    )
+    add(
+        "review_task_attempt_consistency",
+        "critical",
+        _count(
+            conn,
+            """
+            SELECT COUNT(*) FROM review_tasks rt
+            WHERE (rt.source_attempt_id IS NOT NULL AND NOT EXISTS (
+                     SELECT 1 FROM attempts a
+                     WHERE a.attempt_id=rt.source_attempt_id
+                       AND a.student_id=rt.student_id AND a.item_id=rt.item_id
+                   ))
+               OR (rt.completed_by_attempt_id IS NOT NULL AND NOT EXISTS (
+                     SELECT 1 FROM attempts a
+                     WHERE a.attempt_id=rt.completed_by_attempt_id
+                       AND a.student_id=rt.student_id AND a.item_id=rt.item_id
+                   ))
+            """,
+        ),
+        "Review-task source and completion attempts match the task student and item",
+        "Void the invalid task link and rebuild it from the matching student's attempt history.",
+    )
+    add(
+        "generation_artifact_student_consistency",
+        "critical",
+        _count(
+            conn,
+            """
+            SELECT COUNT(*) FROM artifact_generation_runs g
+            JOIN artifacts a ON a.artifact_id=g.output_artifact_id
+            WHERE g.output_artifact_id IS NOT NULL AND g.student_id IS NOT a.student_id
+            """,
+        ),
+        "A generated output artifact belongs to the generation's student",
+        "Detach the cross-student output and register the correct student-owned artifact.",
+    )
+    add(
+        "agent_run_terminal_timestamps",
+        "medium",
+        _count(
+            conn,
+            """
+            SELECT COUNT(*) FROM agent_runs
+            WHERE (status IN ('completed','failed','cancelled') AND completed_at IS NULL)
+               OR (status NOT IN ('completed','failed','cancelled') AND completed_at IS NOT NULL)
+            """,
+        ),
+        "Agent run terminal states and completion timestamps agree",
+        "Append a corrected terminal or progress event through the agent run API.",
+    )
+    add(
+        "agent_run_has_event",
+        "medium",
+        _count(
+            conn,
+            """
+            SELECT COUNT(*) FROM agent_runs r
+            WHERE NOT EXISTS (SELECT 1 FROM agent_run_events e WHERE e.run_id=r.run_id)
+            """,
+        ),
+        "Every routed agent task has an append-only event trail",
+        "Re-register the run or append a planned event before displaying it as active.",
+    )
     counts = {
         table: _count(conn, f'SELECT COUNT(*) FROM "{table}"')
         for table in (
             "students",
             "subjects",
             "student_subjects",
+            "artifacts",
             "learning_sessions",
             "content_items",
             "attempts",
@@ -335,6 +471,9 @@ def run_quality_checks(conn) -> dict[str, Any]:
             "staged_questions",
             "staged_question_knowledge_map",
             "library_structure_reviews",
+            "agent_runs",
+            "agent_run_events",
+            "artifact_generation_runs",
         )
     }
     severity_order = {"critical": 4, "high": 3, "medium": 2, "low": 1}

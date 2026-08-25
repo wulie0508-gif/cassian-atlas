@@ -9,6 +9,42 @@ $env:ENGLISH_TRACKER_DB_NAME = 'learning.sqlite'
 
 Do not open the SQLite database for ad hoc writes. Do not edit migrations already applied. New producers must send JSON through the CLI.
 
+For the current CLI-first lifecycle, explicit multi-learner boundary, and artifact-generation ledger, read [Codex-first multi-learner workflow](docs/CODEX_FIRST_WORKFLOW.md). The website is a read-only projection; it is never the source of a write default.
+
+## Default entry: route once, then load only the required skills
+
+Do not load this entire handoff for routine tutoring work. Invoke `$route-learning-task` with the user's unchanged request, explicit learner, subject, and source conversation. The router calls `POST /api/agent/route` with `register=true`, then executes only the returned skills.
+
+Installed specialist skills:
+
+| Skill | Owns |
+| --- | --- |
+| `$record-learning-evidence` | Sessions, item-level answers, scores, blanks, duration, and offline calibration evidence |
+| `$diagnose-learning-mistakes` | Evidence-backed reading/exercise causes; suggestions stay unverified |
+| `$select-learning-practice` | Due reviews, weighted mastery, and complete-passage weighted set-cover |
+| `$prepare-courseware-context` | Compact lesson/slide context and source-backed teaching-method retrieval |
+| `$run-dictation-workflow` | Due words, raw OCR/typed answers, deterministic grading, and retests |
+| `$sync-learning-dashboard` | Agent-run status only; never learning evidence |
+
+Router request example:
+
+```powershell
+$body = @{
+  request_text = '记录今天的阅读成绩，并分析错题，然后按薄弱点选下次练习'
+  student_id = 'STU-001'
+  subject_code = 'english'
+  source_thread = 'courseware'
+  idempotency_key = 'courseware:2026-08-03:reading-review:v1'
+  register = $true
+} | ConvertTo-Json
+Invoke-RestMethod http://127.0.0.1:8788/api/agent/route `
+  -Method Post `
+  -ContentType 'application/json; charset=utf-8' `
+  -Body ([Text.Encoding]::UTF8.GetBytes($body))
+```
+
+Execute the returned `steps` in order. Independent steps may use subagents in parallel; dependent evidence must be stored before its attempt is diagnosed. Each specialist appends `started`, material `progress`, and one terminal event. The website reads the same run ledger automatically, so no handwritten status handoff is required.
+
 ## Select the learner and subject explicitly
 
 The local app supports multiple learners in one normalized database. Every learner-specific read accepts `student_id` as a query parameter, and every write accepts the same field or the `X-Student-ID` header. Never reuse one learner's cached context for another learner.
@@ -39,6 +75,10 @@ The responses contain current weaknesses, due reviews, project status, question-
 | Need | Method and endpoint |
 | --- | --- |
 | Product languages and subject registry | `GET /api/app-config` |
+| Specialist capability manifest | `GET /api/agent/capabilities` |
+| Route and register one task | `POST /api/agent/route` |
+| Recent runs / automation dashboard | `GET /api/agent/runs`, `GET /api/agent/dashboard` |
+| Append specialist progress | `POST /api/agent/runs/{run_id}/events` |
 | Learner list / create a private learner | `GET /api/students`, `POST /api/students` |
 | One learner's subject summary | `GET /api/subject-overview?student_id=...&subject_code=...` |
 | Low-friction current state and next action | `GET /api/home` |
@@ -49,6 +89,7 @@ The responses contain current weaknesses, due reviews, project status, question-
 | Minimal complete-passage selection | `POST /api/grammar/select-passages` |
 | Source-material RAG search | `GET /api/library/search?q=...` |
 | Staged full-library candidates | `GET /api/library/candidates?q=...` |
+| Create or confirm a learning session | `POST /api/sessions` |
 | Batch classroom attempts | `POST /api/classroom/attempts` |
 | Classroom scores summarized from attempts | `GET /api/performance/sessions?domain=reading` |
 | One reading passage: score, test points, causes, similar items | `GET /api/reading/passages/{passage_id}/performance?session_id={optional}` |

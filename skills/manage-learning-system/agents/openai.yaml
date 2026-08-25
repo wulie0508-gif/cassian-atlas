@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenTutor Platform Engineering"
+  short_description: "Operate and upgrade OpenTutor through its CLI"
+  default_prompt: "Use $manage-learning-system to inspect and upgrade this OpenTutor installation through the CLI control plane."
