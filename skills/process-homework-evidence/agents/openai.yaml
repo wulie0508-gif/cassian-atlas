@@ -1,0 +1,7 @@
+interface:
+  display_name: "Homework Evidence Processor"
+  short_description: "Confirm image answers, then grade and record them"
+  default_prompt: "Use $process-homework-evidence to extract this student's answers, obtain my confirmation, and only then grade and record them."
+
+policy:
+  allow_implicit_invocation: true

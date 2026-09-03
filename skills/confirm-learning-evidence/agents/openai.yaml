@@ -1,0 +1,4 @@
+interface:
+  display_name: "Learning Evidence Confirmation"
+  short_description: "Confirm extracted answers before facts are stored"
+  default_prompt: "Use $confirm-learning-evidence to extract these answers and obtain complete teacher confirmation before committing learning facts."

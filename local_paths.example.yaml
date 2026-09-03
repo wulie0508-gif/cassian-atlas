@@ -1,0 +1,12 @@
+# Copy this file outside the repository and replace placeholders locally.
+# The CLI itself uses --data-dir or ENGLISH_TRACKER_DATA_DIR; this file is a
+# human-readable inventory and is intentionally not loaded automatically.
+data_dir: "C:/path/to/private-learning-data"
+database: "C:/path/to/private-learning-data/db/learning.sqlite"
+student_aliases:
+  STU-LOCAL-001: "PRIVATE_DISPLAY_NAME"
+read_only_sources:
+  legacy_review_db: "C:/path/to/legacy-review.sqlite"
+  mastery_json: "C:/path/to/items.json"
+  calibrated_vocab_db: "C:/path/to/calibrated-vocab.sqlite"
+  question_bank_db: "C:/path/to/question-bank.sqlite"

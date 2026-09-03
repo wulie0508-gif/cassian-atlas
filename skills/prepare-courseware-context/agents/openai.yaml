@@ -1,0 +1,4 @@
+interface:
+  display_name: "Courseware Context"
+  short_description: "Fetch compact evidence for lesson preparation"
+  default_prompt: "Use $prepare-courseware-context to gather the compact evidence needed for this lesson."

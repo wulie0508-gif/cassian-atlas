@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/cassian-atlas/progress-import.schema.json",
+  "title": "Cassian Atlas Progress Import",
+  "type": "object",
+  "required": ["event_id", "idempotency_key", "source_thread", "student_id", "session_id", "progress"],
+  "properties": {
+    "event_id": {"type": "string"},
+    "idempotency_key": {"type": "string"},
+    "source_thread": {"enum": ["engineering", "dictation", "courseware", "manual", "migration"]},
+    "student_id": {"type": "string"},
+    "session_id": {"type": "string"},
+    "progress": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/progressRow"}}
+  },
+  "$defs": {
+    "progressRow": {
+      "type": "object",
+      "required": ["content_label", "progress_status"],
+      "properties": {
+        "progress_id": {"type": "string"},
+        "content_label": {"type": "string"},
+        "external_namespace": {"type": ["string", "null"]},
+        "external_id": {"type": ["string", "null"]},
+        "progress_status": {"enum": ["planned", "in_progress", "completed", "not_started", "skipped"]},
+        "completed_count": {"type": ["integer", "null"], "minimum": 0},
+        "total_count": {"type": ["integer", "null"], "minimum": 0},
+        "note": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

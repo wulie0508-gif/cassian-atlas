@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/cassian-atlas/session-import.schema.json",
+  "title": "Cassian Atlas Session Import",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "idempotency_key", "source_thread", "student_id", "session"],
+  "properties": {
+    "event_id": {"type": "string", "minLength": 1},
+    "idempotency_key": {"type": "string", "minLength": 1},
+    "source_thread": {"enum": ["engineering", "dictation", "courseware", "manual", "migration"]},
+    "student_id": {"type": "string", "pattern": "^STU-[A-Za-z0-9_-]+$"},
+    "artifact": {
+      "type": "object",
+      "required": ["title"],
+      "properties": {
+        "artifact_id": {"type": "string"},
+        "artifact_type": {"type": "string"},
+        "title": {"type": "string"},
+        "material_date": {"type": "string"},
+        "private_path": {"type": ["string", "null"]},
+        "external_uri": {"type": ["string", "null"]},
+        "content_sha256": {"type": ["string", "null"]},
+        "verification_status": {"type": "string"}
+      }
+    },
+    "session": {
+      "type": "object",
+      "required": ["session_id", "session_type", "title", "started_at"],
+      "properties": {
+        "session_id": {"type": "string"},
+        "session_type": {"type": "string"},
+        "title": {"type": "string"},
+        "started_at": {"type": "string"},
+        "ended_at": {"type": ["string", "null"]},
+        "planned_item_count": {"type": ["integer", "null"], "minimum": 0},
+        "completed_item_count": {"type": ["integer", "null"], "minimum": 0},
+        "note": {"type": ["string", "null"]}
+      }
+    },
+    "assessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assessment_kind", "reporting_series"],
+      "properties": {
+        "assessment_kind": {"enum": ["lesson", "topic_quiz", "biweekly_mixed_test", "full_exam", "dictation", "homework", "other"]},
+        "reporting_series": {"type": "string", "minLength": 1},
+        "delivery_mode": {"enum": ["offline_closed", "offline_open", "online", "home", "unspecified"]},
+        "raw_score": {"type": ["number", "null"], "minimum": 0},
+        "max_score": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "duration_seconds": {"type": ["integer", "null"], "minimum": 0},
+        "blank_count": {"type": ["integer", "null"], "minimum": 0},
+        "validation_status": {"enum": ["verified", "source_checked", "unverified", "needs_check"]}
+      },
+      "allOf": [
+        {
+          "if": {"required": ["raw_score"]},
+          "then": {"required": ["max_score"]}
+        }
+      ]
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["observation_text"],
+        "properties": {
+          "observation_id": {"type": "string"},
+          "observation_type": {"type": "string"},
+          "observation_text": {"type": "string"},
+          "evidence_level": {"enum": ["session_only", "item_linked", "teacher_confirmed"]}
+        }
+      }
+    },
+    "progress": {
+      "type": "array",
+      "items": {"$ref": "progress-import.schema.json#/$defs/progressRow"}
+    }
+  }
+}

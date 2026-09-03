@@ -1,0 +1,4 @@
+interface:
+  display_name: "Learning Evidence Recorder"
+  short_description: "Store classroom and assessment evidence safely"
+  default_prompt: "Use $record-learning-evidence to validate and store these item-level learning results."

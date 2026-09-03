@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cassian Atlas Platform Engineering"
+  short_description: "Operate and upgrade Cassian Atlas through its CLI"
+  default_prompt: "Use $manage-learning-system to inspect and upgrade this Cassian Atlas installation through the CLI control plane."

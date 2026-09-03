@@ -1,0 +1,4 @@
+interface:
+  display_name: "Learning Projection Publisher"
+  short_description: "Stage Cassian-only operational Base projections"
+  default_prompt: "Use $publish-learning-projection to validate and stage this learner-scoped operational projection without exposing learning facts or performing an unapproved Feishu write."

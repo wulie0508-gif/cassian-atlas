@@ -1,0 +1,4 @@
+interface:
+  display_name: "Learning Dashboard Sync"
+  short_description: "Track specialist progress in the local dashboard"
+  default_prompt: "Use $sync-learning-dashboard to register this agent task and update its dashboard status."

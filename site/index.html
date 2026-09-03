@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Cassian Atlas 是面向 Agent 协作教学的本地优先学习证据操作系统：记录每次作答，导航下一节课。">
+  <meta name="theme-color" content="#10281f">
+  <meta name="referrer" content="no-referrer">
+  <meta name="cassian-atlas-demo-data" content="synthetic">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'; upgrade-insecure-requests">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Cassian Atlas — Evidence OS for agent-native tutoring">
+  <meta property="og:description" content="记录每次作答，导航下一节课。">
+  <meta property="og:url" content="https://wulie0508-gif.github.io/cassian-atlas/">
+  <meta property="og:image" content="https://wulie0508-gif.github.io/cassian-atlas/assets/social-card.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Cassian Atlas — 记录每次作答，导航下一节课">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Cassian Atlas — Evidence OS for agent-native tutoring">
+  <meta name="twitter:description" content="Map every attempt. Navigate the next lesson.">
+  <meta name="twitter:image" content="https://wulie0508-gif.github.io/cassian-atlas/assets/social-card.png">
+  <title>Cassian Atlas — 记录每次作答，导航下一节课</title>
+  <link rel="canonical" href="https://wulie0508-gif.github.io/cassian-atlas/">
+  <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
+  <link rel="alternate" href="demo-manifest.json" type="application/json" title="Synthetic demo manifest">
+  <link rel="stylesheet" href="styles.css?v=0.5.0">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">跳到主要内容</a>
+
+  <header class="site-header" id="top">
+    <div class="nav-shell">
+      <a class="brand" href="#top" aria-label="Cassian Atlas 首页">
+        <svg class="brand-mark" aria-hidden="true" viewBox="0 0 48 48">
+          <path d="M5 10c7-2.6 13-1 19 4.8v25C18 35 12 33.8 5 36.4V10Z"/>
+          <path d="M43 10c-7-2.6-13-1-19 4.8v25c6-4.8 12-6 19-3.4V10Z"/>
+          <circle cx="14" cy="21" r="2"/><circle cx="34" cy="21" r="2"/>
+        </svg>
+        <span><strong>Cassian Atlas</strong><small>EVIDENCE OS · LEARNING MAP</small></span>
+      </a>
+
+      <button class="menu-toggle" id="menu-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation">
+        <span>菜单</span><i aria-hidden="true"></i>
+      </button>
+
+      <nav class="primary-navigation" id="primary-navigation" aria-label="主导航">
+        <a href="#demo">产品演示</a>
+        <a href="#teaching-value">教学价值</a>
+        <a href="#evidence">证据模型</a>
+        <a href="#architecture">技术架构</a>
+        <a href="#privacy">隐私边界</a>
+        <a href="#rag-pack">私有题库</a>
+        <a class="nav-github" href="https://github.com/wulie0508-gif/cassian-atlas">GitHub <span aria-hidden="true">↗</span></a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main-content">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow"><span></span>EVIDENCE OS FOR AGENT-NATIVE TUTORING</p>
+          <h1 id="hero-title">记录每次作答，<br>导航下一节课。</h1>
+          <p class="hero-lead">Cassian Atlas 把课堂作答、错题诊断、复测进度与 Agent 运行记录绘成一张可追溯的学习地图。Codex 负责执行，Atlas 负责组织证据，教师始终保留判断。</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#demo">进入合成数据演示</a>
+            <a class="text-link" href="https://github.com/wulie0508-gif/cassian-atlas">查看开源仓库 <span aria-hidden="true">↗</span></a>
+          </div>
+          <ul class="hero-proof" aria-label="核心产品原则">
+            <li>教师保留判断权</li>
+            <li>重复工作交给 Agent</li>
+            <li>数据默认留在本机</li>
+          </ul>
+        </div>
+
+        <aside class="hero-manifesto" aria-label="产品设计原则">
+          <p class="manifesto-label">OPERATING PRINCIPLES / 04</p>
+          <ol>
+            <li><span>01</span><div><strong>Evidence over intuition</strong><small>用逐题证据代替模糊印象</small></div></li>
+            <li><span>02</span><div><strong>Comparable by design</strong><small>只比较同口径、同系列结果</small></div></li>
+            <li><span>03</span><div><strong>Human governed</strong><small>模型建议必须保留核验状态</small></div></li>
+            <li><span>04</span><div><strong>Private by default</strong><small>学习事实与公开代码彻底分离</small></div></li>
+          </ol>
+          <div class="manifesto-foot"><span>LOCAL-FIRST</span><span>AGENT-NATIVE</span><span>AUDIT-READY</span></div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="trust-strip" aria-label="可信教学能力">
+      <div><span>01</span><strong>逐题证据</strong><small>Item-level provenance</small></div>
+      <div><span>02</span><strong>同口径趋势</strong><small>Comparable-series analytics</small></div>
+      <div><span>03</span><strong>确定性复测</strong><small>Deterministic review orchestration</small></div>
+      <div><span>04</span><strong>可审计自动化</strong><small>Audit-ready agent workflows</small></div>
+    </section>
+
+    <section class="demo-section section-shell" id="demo" aria-labelledby="demo-title">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow"><span></span>PRODUCT TOUR</p>
+          <h2 id="demo-title">一个页面，回答下一节课该做什么。</h2>
+        </div>
+        <p>下面是完全独立的合成数据演示，不连接任何真实学生、题库或本机数据库。</p>
+      </div>
+
+      <div class="demo-disclosure" role="note">
+        <span class="pulse" aria-hidden="true"></span>
+        <strong>PUBLIC DEMO</strong>
+        <span>示例学生 A · 合成学习数据 · 仅用于产品展示</span>
+      </div>
+
+      <div class="console-frame">
+        <div class="console-chrome">
+          <div class="window-controls" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div class="console-address"><span>LOCAL CONSOLE</span><strong>Evidence workspace / Demo learner</strong></div>
+          <div class="console-health"><span></span>READ ONLY</div>
+        </div>
+
+        <div class="console-layout">
+          <aside class="console-sidebar">
+            <div class="console-brand"><svg aria-hidden="true" viewBox="0 0 48 48"><path d="M5 10c7-2.6 13-1 19 4.8v25C18 35 12 33.8 5 36.4V10Z"/><path d="M43 10c-7-2.6-13-1-19 4.8v25c6-4.8 12-6 19-3.4V10Z"/></svg><span>Teacher<br>Console</span></div>
+            <div class="demo-tabs" role="tablist" aria-label="合成产品演示视图">
+              <button id="tab-overview" type="button" role="tab" aria-selected="true" aria-controls="panel-overview" tabindex="0" data-demo-tab="overview"><span>01</span>教学总览</button>
+              <button id="tab-evidence" type="button" role="tab" aria-selected="false" aria-controls="panel-evidence" tabindex="-1" data-demo-tab="evidence"><span>02</span>证据链预览</button>
+              <button id="tab-agents" type="button" role="tab" aria-selected="false" aria-controls="panel-agents" tabindex="-1" data-demo-tab="agents"><span>03</span>Agent 运行</button>
+            </div>
+            <div class="console-sidebar-note"><span>SYNTHETIC</span><small>No learner data</small></div>
+          </aside>
+
+          <div class="console-main">
+            <header class="console-header">
+              <div><p>TEACHER DECISION SURFACE</p><h3>示例学生 A · 英语</h3></div>
+              <div class="console-meta"><span>更新于 18:40</span><strong>证据状态：可用</strong></div>
+            </header>
+
+            <section class="demo-panel" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" data-demo-panel="overview">
+              <div class="metric-row">
+                <article><span>同系列正确率</span><strong>76.4%</strong><small class="positive">较上次 +8.6 pp</small></article>
+                <article><span>今日到期复测</span><strong>18</strong><small>语法 11 · 词汇 7</small></article>
+                <article><span>稳定薄弱点</span><strong>3</strong><small>来自 42 次有效作答</small></article>
+                <article><span>线下校准</span><strong>82 / 100</strong><small>封闭环境 · 高权重</small></article>
+              </div>
+
+              <div class="decision-layout">
+                <article class="console-card priority-card">
+                  <header><div><span>NEXT LESSON</span><h4>下一节课优先处理</h4></div><small>系统建议 · 教师确认</small></header>
+                  <ol class="priority-list">
+                    <li><b>01</b><div><strong>非谓语动词：逻辑主语判断</strong><span>近 14 天 12 次作答 · 正确率 50%</span></div><em>高优先</em></li>
+                    <li><b>02</b><div><strong>固定搭配：主动提取</strong><span>复测恢复率 44% · 仍需间隔练习</span></div><em>待巩固</em></li>
+                    <li><b>03</b><div><strong>语态与时态联动</strong><span>连续两课出现同类错误</span></div><em>再确认</em></li>
+                  </ol>
+                  <div class="decision-rationale"><span>WHY THIS ORDER</span><p>优先级综合错误频率、最近性、复测恢复率与样本可信度；一次偶发错误不会直接升级为稳定结论。</p></div>
+                </article>
+
+                <article class="console-card trend-card">
+                  <header><div><span>COMPARABLE SERIES</span><h4>同口径课堂训练</h4></div><small>最近 5 次</small></header>
+                  <figure>
+                    <svg viewBox="0 0 480 205" role="img" aria-labelledby="trend-title trend-desc">
+                      <title id="trend-title">五次同口径课堂训练正确率趋势</title>
+                      <desc id="trend-desc">正确率依次为百分之五十八、六十三、六十九、六十八和七十六点四。</desc>
+                      <g class="grid-lines"><line x1="36" y1="25" x2="456" y2="25"/><line x1="36" y1="88" x2="456" y2="88"/><line x1="36" y1="151" x2="456" y2="151"/></g>
+                      <g class="axis-labels"><text x="4" y="29">90%</text><text x="4" y="92">70%</text><text x="4" y="155">50%</text></g>
+                      <path class="trend-area" d="M42 126 L144 110 L246 91 L348 94 L450 68 L450 170 L42 170 Z"/>
+                      <path class="trend-line" d="M42 126 L144 110 L246 91 L348 94 L450 68"/>
+                      <g class="trend-points"><circle cx="42" cy="126" r="5"/><circle cx="144" cy="110" r="5"/><circle cx="246" cy="91" r="5"/><circle cx="348" cy="94" r="5"/><circle cx="450" cy="68" r="6"/></g>
+                      <g class="x-labels"><text x="30" y="195">W1</text><text x="132" y="195">W2</text><text x="234" y="195">W3</text><text x="336" y="195">W4</text><text x="438" y="195">W5</text></g>
+                    </svg>
+                    <figcaption><span><i></i>课堂语法训练</span><strong>趋势可比，而非简单连分</strong></figcaption>
+                  </figure>
+                </article>
+              </div>
+
+              <div class="console-footline"><span>Answer capture 100%</span><span>Knowledge mapping 91%</span><span>Error diagnosis 76%</span><span>Offline anchors 2</span></div>
+            </section>
+
+            <section class="demo-panel" id="panel-evidence" role="tabpanel" aria-labelledby="tab-evidence" data-demo-panel="evidence" hidden>
+              <div class="roadmap-preview" role="note"><strong>DESIGN PREVIEW</strong><span>路线图预览：当前系统已经分别保存这些证据；此处展示的是计划中的聚合时间线界面，尚未作为正式操作界面发布。</span></div>
+              <div class="evidence-panel-grid">
+                <article class="console-card evidence-timeline">
+                  <header><div><span>LONGITUDINAL EVIDENCE · ROADMAP</span><h4>一条薄弱点，完整证据链</h4></div><small>非谓语动词</small></header>
+                  <ol>
+                    <li><time>08 / 12</time><div><strong>首次错误</strong><p>选择了谓语形式；原始答案已保存。</p></div><span class="tag tentative">待确认</span></li>
+                    <li><time>08 / 15</time><div><strong>同类再错</strong><p>在不同语境重复出现逻辑主语判断错误。</p></div><span class="tag observed">已观察</span></li>
+                    <li><time>08 / 18</time><div><strong>课堂讲解</strong><p>知识点与示例已关联，未把“讲过”当作“掌握”。</p></div><span class="tag logged">已记录</span></li>
+                    <li><time>08 / 22</time><div><strong>间隔复测</strong><p>4 题正确 3 题，恢复率 75%。</p></div><span class="tag improved">恢复中</span></li>
+                  </ol>
+                </article>
+                <article class="console-card evidence-definition">
+                  <header><div><span>EVIDENCE CONTRACT</span><h4>系统知道什么，也知道不知道什么</h4></div></header>
+                  <dl>
+                    <div><dt>题目考什么</dt><dd>知识点映射附带来源、角色、置信度和核验状态。</dd></div>
+                    <div><dt>学生答了什么</dt><dd>保留原始答案；未采集时明确标记，不反向猜测。</dd></div>
+                    <div><dt>为什么会错</dt><dd>错因属于单次作答证据，模型建议不会自动变成事实。</dd></div>
+                    <div><dt>是否真正恢复</dt><dd>只有后续独立复测才能更新恢复状态。</dd></div>
+                  </dl>
+                  <div class="evidence-signature"><span>PROVENANCE</span><span>REVISIONED</span><span>HUMAN VERIFIED</span></div>
+                </article>
+              </div>
+            </section>
+
+            <section class="demo-panel" id="panel-agents" role="tabpanel" aria-labelledby="tab-agents" data-demo-panel="agents" hidden>
+              <article class="console-card agent-workflow-card">
+                <header><div><span>AUDIT-READY ORCHESTRATION</span><h4>Agent 做流程，教师做判断</h4></div><small>最近一次备课运行</small></header>
+                <div class="agent-flow" aria-label="Agent 工作流程">
+                  <div class="flow-node complete"><span>01</span><strong>Route</strong><small>识别为错题复盘</small></div><i aria-hidden="true">→</i>
+                  <div class="flow-node complete"><span>02</span><strong>Diagnose</strong><small>读取逐题证据</small></div><i aria-hidden="true">→</i>
+                  <div class="flow-node complete"><span>03</span><strong>Select</strong><small>匹配复测题目</small></div><i aria-hidden="true">→</i>
+                  <div class="flow-node review"><span>04</span><strong>Review</strong><small>等待教师确认</small></div>
+                </div>
+                <div class="run-ledger">
+                  <div class="run-ledger-head"><span>RUN EVENT</span><span>CAPABILITY</span><span>STATE</span><span>EVIDENCE</span></div>
+                  <div><span>08:41:02 · Routed</span><span>diagnosis</span><strong>COMPLETE</strong><span>18 attempts</span></div>
+                  <div><span>08:41:05 · Selected</span><span>practice</span><strong>COMPLETE</strong><span>5 source items</span></div>
+                  <div><span>08:41:08 · Generated</span><span>courseware</span><strong class="attention">REVIEW</strong><span>1 artifact</span></div>
+                </div>
+                <p class="agent-boundary">运行台账与学习证据分表保存：Agent “完成任务”永远不会被系统误算成学生“掌握知识”。</p>
+              </article>
+            </section>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="evidence-story section-shell" id="evidence" aria-labelledby="evidence-title">
+      <div class="section-heading editorial-heading">
+        <div><p class="eyebrow"><span></span>FROM ACTIVITY TO EVIDENCE</p><h2 id="evidence-title">不是更多数据，<br>而是更清楚的下一步。</h2></div>
+        <p>分数只是一次结果。教学真正需要的是：这次考了什么、学生怎样作答、错误是否重复、复测是否恢复，以及这些证据够不够支撑结论。</p>
+      </div>
+      <ol class="evidence-flow">
+        <li><span>01</span><div><small>CAPTURE</small><h3>记录真实作答</h3><p>保存原始答案、题目快照、课次和证据来源，不用课后印象补写事实。</p></div></li>
+        <li><span>02</span><div><small>DIAGNOSE</small><h3>区分考点与错因</h3><p>题目知识映射回答“考什么”；单次错误证据回答“为什么错”。</p></div></li>
+        <li><span>03</span><div><small>REVIEW</small><h3>排入确定性复测</h3><p>根据错误频率、最近性和恢复记录生成到期队列，而不是无限加题。</p></div></li>
+        <li><span>04</span><div><small>CALIBRATE</small><h3>用线下测试校准</h3><p>封闭环境测验提供高权重锚点，同时保留课堂训练的长期信息。</p></div></li>
+      </ol>
+    </section>
+
+    <section class="audience-section" id="teaching-value">
+      <div class="section-shell audience-grid">
+        <article class="audience-panel educator-panel">
+          <p class="eyebrow light"><span></span>FOR FAMILIES & EDUCATORS</p>
+          <h2>教学透明，不等于堆一张成绩表。</h2>
+          <p>真正可解释的教学，不只告诉你“这次考了多少”，还说明讲了什么、错在哪里、哪些错误已经复测、下一节课为什么先处理这一项。</p>
+          <ul><li>看见稳定薄弱点，而非一次偶发失误</li><li>看见复测恢复，而非“已经讲过”</li><li>看见下一课依据，而非模板化安排</li></ul>
+        </article>
+        <article class="audience-panel builder-panel">
+          <p class="eyebrow"><span></span>FOR BUILDERS</p>
+          <h2>Built for agents.<br>Governed by evidence.</h2>
+          <p>Audited writes, idempotent ingestion, revisioned evaluation, learner isolation, and a deliberately read-only decision surface.</p>
+          <div class="builder-terms"><span>Evidence Ledger</span><span>Review Engine</span><span>Calibration Layer</span><span>Agent Router</span></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="architecture-section section-shell" id="architecture" aria-labelledby="architecture-title">
+      <div class="section-heading">
+        <div><p class="eyebrow"><span></span>LOCAL-FIRST ARCHITECTURE</p><h2 id="architecture-title">复杂性留在系统里，<br>判断权留在教师手里。</h2></div>
+        <p>公开仓库只包含软件、模式与匿名示例。真实学习记录、题库和资料库位于仓库外，并通过明确配置接入。</p>
+      </div>
+      <div class="architecture-map" aria-label="Cassian Atlas 架构">
+        <div class="architecture-column input-column"><small>INPUT</small><div><span>课堂作答</span><span>听写结果</span><span>线下测验</span><span>教师核验</span></div></div>
+        <div class="architecture-arrow" aria-hidden="true">→</div>
+        <div class="architecture-core"><small>PRIVATE CORE</small><strong>Evidence<br>Ledger</strong><p>Immutable attempts<br>Revisioned evaluations<br>Learner isolation</p></div>
+        <div class="architecture-arrow" aria-hidden="true">→</div>
+        <div class="architecture-column output-column"><small>DECISION</small><div><span>稳定薄弱点</span><span>复测队列</span><span>同口径趋势</span><span>下一课建议</span></div></div>
+        <div class="agent-orbit"><span>AGENT ROUTER</span><p>Route · Diagnose · Select · Generate</p><small>Learning-evidence writes use audited, idempotent APIs</small></div>
+      </div>
+    </section>
+
+    <section class="privacy-section" id="privacy" aria-labelledby="privacy-title">
+      <div class="section-shell privacy-grid">
+        <div class="privacy-copy">
+          <p class="eyebrow light"><span></span>PRIVACY-PRESERVING BY ARCHITECTURE</p>
+          <h2 id="privacy-title">公开的是代码，<br>不是学生。</h2>
+          <p>Cassian Atlas 从结构上分离公共软件与私有学习证据。公网展示站使用独立合成数据，不连接本地服务，也没有隐藏的“演示开关”。</p>
+          <a class="text-link light-link" href="https://github.com/wulie0508-gif/cassian-atlas/blob/main/docs/PRIVACY_BOUNDARY.md">阅读完整隐私边界 <span aria-hidden="true">↗</span></a>
+        </div>
+        <dl class="privacy-contract">
+          <div><dt>LOCAL RUNTIME</dt><dd>SQLite、学习记录与题库默认只在本机或可信网络运行。</dd></div>
+          <div><dt>PUBLIC SHOWCASE</dt><dd>纯静态合成数据；没有 API、数据库连接或真实身份。</dd></div>
+          <div><dt>RELEASE GATE</dt><dd>测试会拦截数据库、文档、媒体、本机路径和已知学生标识。</dd></div>
+          <div><dt>HUMAN CONTROL</dt><dd>模型诊断保持 suggested，只有人工核验后才能成为 verified。</dd></div>
+        </dl>
+      </div>
+    </section>
+
+    <section class="open-source-section section-shell" id="open-source" aria-labelledby="open-source-title">
+      <div class="open-source-grid">
+        <div>
+          <p class="eyebrow"><span></span>OPEN SOURCE · MIT</p>
+          <h2 id="open-source-title">Own the evidence layer.</h2>
+          <p>依赖极简的 Python + SQLite 核心，可扩展多学生、多学科和专用 Agent 技能。数据位置、题库来源与教学判断始终由使用者控制。</p>
+          <div class="repo-actions"><a class="button button-primary" href="https://github.com/wulie0508-gif/cassian-atlas">Explore on GitHub</a><a class="text-link" href="https://github.com/wulie0508-gif/cassian-atlas/blob/main/ARCHITECTURE.md">Read the architecture <span aria-hidden="true">↗</span></a></div>
+        </div>
+        <div class="install-block">
+          <div class="install-head"><span>CLONE & INSPECT</span><button id="copy-command" type="button" data-copy="git clone https://github.com/wulie0508-gif/cassian-atlas.git&#10;cd cassian-atlas&#10;python -m pip install -e .&#10;cassian --help">复制</button></div>
+          <pre><code><span>$</span> git clone https://github.com/wulie0508-gif/cassian-atlas.git
+<span>$</span> cd cassian-atlas
+<span>$</span> python -m pip install -e .
+<span>$</span> cassian --help</code></pre>
+          <p>Read the repository Quick start before creating a private runtime.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="corpus-section" id="rag-pack" aria-labelledby="corpus-title">
+      <div class="section-shell corpus-grid">
+        <div class="corpus-copy">
+          <p class="eyebrow"><span></span>PRIVATE CORPUS · LICENSED SEPARATELY</p>
+          <h2 id="corpus-title">Open-source the workflow.<br>License the content separately.</h2>
+          <p>我们另行维护面向近三年上海英语考试资料的结构化索引与来源可追踪检索切片。对于已有明确权利依据，或由客户合法取得并提供的材料，可提供私有题库接入、RAG 检索适配、知识点选题、错题复测与组卷工作流服务。</p>
+          <p class="corpus-boundary">公开仓库不包含试卷、文章、答案、学生记录或 API 凭据；具体年份、卷别、题型、交付范围与使用权以书面资料清单和授权约定为准。本项目不暗示与考试机构、学校或出版社存在官方合作。</p>
+        </div>
+        <aside class="corpus-card" aria-label="上海英语题库商务合作">
+          <span>SHANGHAI ENGLISH · RAG READY</span>
+          <strong>把私有内容接入一条<br>可追溯的教学证据链。</strong>
+          <ul>
+            <li>来源可追踪的结构化索引</li>
+            <li>完整语篇检索与知识点覆盖</li>
+            <li>私有部署与组卷工作流适配</li>
+          </ul>
+          <a class="button button-primary" href="mailto:wulie0508@gmail.com">Discuss licensing →</a>
+          <small>wulie0508@gmail.com</small>
+        </aside>
+      </div>
+    </section>
+
+    <section class="final-cta">
+      <div class="section-shell">
+        <p>THE NEXT LESSON STARTS WITH BETTER EVIDENCE.</p>
+        <h2>把“我觉得他没掌握”，<br>变成一条可以验证的证据链。</h2>
+        <div><a class="button button-light" href="#demo">重新查看产品演示</a><a class="text-link light-link" href="https://github.com/wulie0508-gif/cassian-atlas">Star on GitHub <span aria-hidden="true">↗</span></a></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="section-shell footer-grid">
+      <div class="footer-brand"><strong>Cassian Atlas</strong><span>Map every attempt. Navigate the next lesson.</span></div>
+      <div class="footer-links"><a href="#demo">Demo</a><a href="#privacy">Privacy</a><a href="#rag-pack">Private corpus</a><a href="mailto:wulie0508@gmail.com">Contact</a><a href="https://github.com/wulie0508-gif/cassian-atlas">GitHub</a><a href="https://github.com/wulie0508-gif/cassian-atlas/blob/main/LICENSE">MIT License</a></div>
+      <p>© <span id="current-year">2026</span> Cassian Atlas contributors. Public demo contains synthetic data only.</p>
+    </div>
+  </footer>
+
+  <div class="sr-only" id="site-status" role="status" aria-live="polite"></div>
+  <script src="app.js?v=0.5.0" defer></script>
+</body>
+</html>

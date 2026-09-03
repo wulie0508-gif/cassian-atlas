@@ -1,0 +1,4 @@
+interface:
+  display_name: "Practice Selector"
+  short_description: "Select minimal high-coverage review material"
+  default_prompt: "Use $select-learning-practice to choose the smallest high-coverage review set."

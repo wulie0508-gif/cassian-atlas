@@ -1,0 +1,9 @@
+{
+  "schema_version": "cassian-atlas-public-demo-v1",
+  "synthetic": true,
+  "connected_to_runtime": false,
+  "contains_real_learner_data": false,
+  "contains_question_bank_content": false,
+  "contains_local_paths": false,
+  "description": "All people, scores, events, priorities, and timelines shown by this static showcase are manually authored synthetic examples."
+}

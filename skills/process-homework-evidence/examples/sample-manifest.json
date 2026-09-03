@@ -1,0 +1,13 @@
+{
+  "prompt_version": "opentutor-transcription-page-v1",
+  "page_label": "sample-page",
+  "items": [
+    {
+      "item_id": "Q1",
+      "question_label": "1",
+      "question_type": "multiple_choice",
+      "risk_level": "R0",
+      "bbox": [0, 0, 100, 100]
+    }
+  ]
+}

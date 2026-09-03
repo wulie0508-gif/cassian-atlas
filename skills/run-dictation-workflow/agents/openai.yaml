@@ -1,0 +1,4 @@
+interface:
+  display_name: "Dictation Workflow"
+  short_description: "Plan grade record and reschedule dictation"
+  default_prompt: "Use $run-dictation-workflow to process this dictation through the fixed local workflow."

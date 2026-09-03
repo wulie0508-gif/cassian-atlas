@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mistake Diagnosis"
+  short_description: "Diagnose reading and exercise errors from evidence"
+  default_prompt: "Use $diagnose-learning-mistakes to analyze these wrong answers without inventing missing evidence."

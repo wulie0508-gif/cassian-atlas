@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/cassian-atlas/reading-diagnostics.schema.json",
+  "title": "Reading attempt diagnostics import",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "idempotency_key", "source_thread", "student_id", "diagnostics"],
+  "properties": {
+    "event_id": {"type": "string", "minLength": 1},
+    "idempotency_key": {"type": "string", "minLength": 1},
+    "source_thread": {"enum": ["engineering", "dictation", "courseware", "manual", "migration"]},
+    "student_id": {"type": "string", "minLength": 1},
+    "diagnostics": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["attempt_id", "error_types"],
+        "properties": {
+          "attempt_id": {"type": "string", "minLength": 1},
+          "error_types": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["rationale"],
+              "anyOf": [{"required": ["code"]}, {"required": ["raw_error_type"]}],
+              "properties": {
+                "code": {"type": "string", "minLength": 1},
+                "raw_error_type": {"type": "string", "minLength": 1},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "note": {"type": ["string", "null"]},
+                "error_source": {"enum": ["student_answer", "teacher_observation", "manual", "legacy", "rule", "model_suggested"]},
+                "verification_status": {"enum": ["suggested", "source_checked", "verified", "needs_check", "rejected", "unverified"]},
+                "rationale": {"type": "string", "minLength": 1}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
